@@ -6,10 +6,12 @@ import { foodOrderRouter } from "./food-order.routes.js";
 import { laundryRouter } from "./laundry.routes.js";
 import { cashRouter } from "./cash.routes.js";
 import { dashboardRouter } from "./dashboard.routes.js";
+import { userRouter } from "./user.routes.js";
 
 export const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+apiRouter.use("/users", userRouter);
 apiRouter.use("/guests", guestRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/food-orders", foodOrderRouter);

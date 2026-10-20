@@ -96,6 +96,7 @@ nicabliss_api/
     |   `-- cash.model.ts        # Turnos de caja y movimientos
     |-- dtos/                    # Contratos de Datos (Data Transfer Objects)
     |   |-- auth.dto.ts
+    |   |-- user.dto.ts
     |   |-- guest.dto.ts
     |   |-- billing.dto.ts
     |   |-- food-order.dto.ts
@@ -110,6 +111,7 @@ nicabliss_api/
     |   `-- cash.repository.ts
     |-- services/                # Logica de negocio, reglas y validaciones
     |   |-- auth.service.ts
+    |   |-- user.service.ts
     |   |-- guest.service.ts
     |   |-- billing.service.ts
     |   |-- food-order.service.ts
@@ -118,6 +120,7 @@ nicabliss_api/
     |   `-- dashboard.service.ts
     |-- controllers/             # Manejadores de peticion (Request) y respuesta (Response)
     |   |-- auth.controller.ts
+    |   |-- user.controller.ts
     |   |-- guest.controller.ts
     |   |-- billing.controller.ts
     |   |-- food-order.controller.ts
@@ -126,6 +129,7 @@ nicabliss_api/
     |   `-- dashboard.controller.ts
     |-- routes/                  # Definicion de rutas y endpoints Express
     |   |-- auth.routes.ts
+    |   |-- user.routes.ts
     |   |-- guest.routes.ts
     |   |-- billing.routes.ts
     |   |-- food-order.routes.ts
@@ -311,7 +315,79 @@ Retorna los datos del usuario autenticado actual.
 
 ---
 
-### 3. Dashboard y Metricas (/api/v1/dashboard)
+### 3. Gestión Integral de Usuarios y Roles (/api/v1/users)
+*Todos los endpoints bajo `/api/v1/users` requieren obligatoriamente autenticación y rol de Administrador (`authMiddleware` + `requireRole("ADMIN")`).*
+
+#### GET /api/v1/users
+Retorna la lista completa de usuarios del sistema con sus roles y perfiles (omitiendo estrictamente el hash de contraseñas).
+- Acceso: Protegido (Solo ADMIN)
+- Respuesta (200 OK):
+```json
+{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "id": "usr_admin_001",
+      "username": "admin",
+      "email": "admin@nicabliss.com",
+      "fullName": "Administrador Nicabliss",
+      "role": "ADMIN",
+      "createdAt": "2026-10-20T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+#### GET /api/v1/users/:id
+Obtiene los detalles y rol de un usuario específico mediante su identificador único.
+- Acceso: Protegido (Solo ADMIN)
+
+#### POST /api/v1/users
+Crea un nuevo usuario en la base de datos asignándole su rol (`ADMIN`, `RECEPTIONIST`, o `STAFF`).
+- Acceso: Protegido (Solo ADMIN)
+- Body:
+```json
+{
+  "username": "marta_staff",
+  "email": "marta@nicabliss.com",
+  "password": "PasswordSegura123",
+  "fullName": "Marta Mantenimiento",
+  "role": "STAFF"
+}
+```
+- Respuesta (201 Created): Retorna el usuario creado con ID único.
+
+#### PUT /api/v1/users/:id
+Actualiza la información de un usuario (rol, nombre, correo o contraseña).
+- Acceso: Protegido (Solo ADMIN)
+- Body:
+```json
+{
+  "fullName": "Marta Jefa de Turno",
+  "role": "RECEPTIONIST"
+}
+```
+- Respuesta (200 OK): Retorna el usuario actualizado.
+- **Regla de Protección de Integridad:** Se prohíbe degradar o modificar el rol del administrador principal (`admin` / `usr_admin_001`).
+
+#### DELETE /api/v1/users/:id
+Elimina de forma permanente un usuario del sistema.
+- Acceso: Protegido (Solo ADMIN)
+- Respuesta (200 OK):
+```json
+{
+  "success": true,
+  "message": "Usuario con ID 'usr_123' eliminado correctamente"
+}
+```
+- **Senior Security Guardrails:**
+  1. **Anti-Autoeliminación:** Un administrador no puede eliminar su propia cuenta activa (`req.user.sub === id`).
+  2. **Protección del Root Admin:** El usuario administrador principal no puede ser eliminado.
+
+---
+
+### 4. Dashboard y Metricas (/api/v1/dashboard)
 
 #### GET /api/v1/dashboard/metrics
 Retorna las estadisticas agregadas del hotel en tiempo real.
@@ -336,7 +412,7 @@ Retorna las estadisticas agregadas del hotel en tiempo real.
 
 ---
 
-### 4. Huespedes y Estancias (/api/v1/guests)
+### 5. Huespedes y Estancias (/api/v1/guests)
 
 #### GET /api/v1/guests
 Lista los huespedes registrados. Soporta busqueda con ?search=.
@@ -381,7 +457,7 @@ Elimina el registro de un huesped del sistema.
 
 ---
 
-### 5. Cuentas y Cobros (/api/v1/billing)
+### 6. Cuentas y Cobros (/api/v1/billing)
 
 #### GET /api/v1/billing
 Obtiene todas las cuentas, el total facturado, cobrado y saldo global pendiente.
@@ -437,7 +513,7 @@ Elimina una cuenta de cobro pendiente.
 
 ---
 
-### 6. Pedidos de Alimentos (/api/v1/food-orders)
+### 7. Pedidos de Alimentos (/api/v1/food-orders)
 
 #### GET /api/v1/food-orders
 Lista los pedidos de restaurante/cocina.
@@ -473,7 +549,7 @@ Elimina una comanda del sistema.
 
 ---
 
-### 7. Lavanderia (/api/v1/laundry)
+### 8. Lavanderia (/api/v1/laundry)
 
 #### GET /api/v1/laundry
 Lista las solicitudes de lavanderia.
@@ -506,7 +582,7 @@ Elimina una orden de lavanderia del sistema.
 
 ---
 
-### 8. Caja y Cierres (/api/v1/cash-register)
+### 9. Caja y Cierres (/api/v1/cash-register)
 
 #### GET /api/v1/cash-register/current
 Consulta los datos de la sesion de caja activa actual. Retorna data: null si la caja esta cerrada.

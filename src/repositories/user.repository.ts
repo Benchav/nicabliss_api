@@ -70,6 +70,14 @@ export class UserRepository {
     return result.rows.map(mapRowToUser);
   }
 
+  public async delete(id: string): Promise<boolean> {
+    const result = await dbClient.execute({
+      sql: `DELETE FROM users WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
+  }
+
   public async reset(): Promise<void> {
     await dbClient.execute(`DELETE FROM users WHERE username != 'admin';`);
   }
