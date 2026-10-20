@@ -88,11 +88,24 @@ export class BillingRepository {
     };
   }
 
+  public async delete(id: number): Promise<boolean> {
+    const result = await dbClient.execute({
+      sql: `DELETE FROM billing_accounts WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
+  }
+
   public async reset(): Promise<void> {
     await dbClient.execute(`DELETE FROM billing_accounts WHERE id NOT IN (1001, 1002, 1003);`);
     await dbClient.execute(`
       UPDATE billing_accounts 
-      SET pagado = 0, saldo = total, estado = 'Pendiente' 
+      SET total = 40, pagado = 40, saldo = 0, estado = 'Pagado' 
+      WHERE id = 1001;
+    `);
+    await dbClient.execute(`
+      UPDATE billing_accounts 
+      SET total = 12.5, pagado = 0, saldo = 12.5, estado = 'Pendiente' 
       WHERE id = 1002;
     `);
   }

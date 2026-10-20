@@ -80,4 +80,38 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.status, 404);
     assert.equal(res.body.error.code, "NOT_FOUND");
   });
+
+  it("PUT /api/v1/guests/:id -> actualiza huésped con 200 OK", async () => {
+    const res = await api("/api/v1/guests/1", {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ habitacion: "Habitación 10" }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.data.habitacion, "Habitación 10");
+  });
+
+  it("DELETE /api/v1/guests/:id -> elimina huésped con 200 OK", async () => {
+    const createRes = await api("/api/v1/guests", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        nombre: "Test Delete E2E",
+        documento: "P-E2E-99",
+        habitacion: "Habitación 99",
+        entrada: "2026-10-20",
+        salida: "2026-10-21",
+      }),
+    });
+    const guestId = createRes.body.data.id;
+
+    const deleteRes = await api(`/api/v1/guests/${guestId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    assert.equal(deleteRes.status, 200);
+    assert.equal(deleteRes.body.success, true);
+  });
 });
+

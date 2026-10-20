@@ -73,4 +73,13 @@ export class GuestRepository {
     });
     return result.rowsAffected > 0;
   }
+
+  public async reset(): Promise<void> {
+    await dbClient.execute(`DELETE FROM guests WHERE id NOT IN (1, 2, 3, 4);`);
+    await dbClient.execute(`
+      UPDATE guests 
+      SET nombre = 'María González', habitacion = 'Habitación 01', estado = 'Activo' 
+      WHERE id = 1;
+    `);
+  }
 }

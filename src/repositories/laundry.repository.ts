@@ -85,4 +85,12 @@ export class LaundryRepository {
     `);
     return Number(result.rows[0].count);
   }
+
+  public async delete(id: number): Promise<boolean> {
+    const result = await dbClient.execute({
+      sql: `DELETE FROM laundry_orders WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
+  }
 }

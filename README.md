@@ -361,8 +361,23 @@ Registra un nuevo huesped.
 ```
 - Regla de Negocio: Falla con 400 VALIDATION_ERROR si la fecha de salida es anterior a entrada.
 
+#### PUT /api/v1/guests/:id
+Actualiza los datos completos de un huesped (nombre, documento, habitacion, fechas o estado).
+- Body:
+```json
+{
+  "nombre": "Maria Gonzalez",
+  "habitacion": "Habitacion 02",
+  "salida": "2026-10-22"
+}
+```
+
 #### PATCH /api/v1/guests/:id/status
 Actualiza el estado de una estancia (Activo | Finalizado | Reservado).
+
+#### DELETE /api/v1/guests/:id
+Elimina el registro de un huesped del sistema.
+- Respuesta (200 OK): `{ "success": true, "message": "Huesped con id 1 eliminado correctamente" }`
 
 ---
 
@@ -395,6 +410,17 @@ Crea una nueva cuenta o cargo para una habitacion.
 }
 ```
 
+#### PUT /api/v1/billing/:id
+Actualiza los datos o el total de una cuenta de cobro, recalculando automaticamente el saldo y el estado.
+- Body:
+```json
+{
+  "concepto": "Estancia extendida a 4 noches",
+  "total": 160.0
+}
+```
+- Regla de Negocio: El total no puede ser inferior a los abonos ya registrados.
+
 #### POST /api/v1/billing/:id/payments
 Registra un abono a una cuenta existente.
 - Body:
@@ -404,6 +430,10 @@ Registra un abono a una cuenta existente.
 }
 ```
 - Regla de Negocio: Si el monto abonado completa la deuda, el estado cambia automaticamente a Pagado. Si es parcial, a Parcial. Rechaza con error 400 si el monto supera el saldo pendiente.
+
+#### DELETE /api/v1/billing/:id
+Elimina una cuenta de cobro pendiente.
+- Regla Contable: Solo permite eliminar cuentas sin abonos o pagos registrados (`pagado === 0`). Si tiene pagos, rechaza con 400 VALIDATION_ERROR para proteger la auditoria fiscal.
 
 ---
 
@@ -425,8 +455,21 @@ Crea una nueva comanda de alimentos.
 ```
 - Nota: Genera automaticamente un codigo de comanda correlativo unico (ej: #PED-582) con estado inicial Pendiente.
 
+#### PUT /api/v1/food-orders/:id
+Actualiza los productos, total o destino de la comanda.
+- Body:
+```json
+{
+  "productos": "2 desayunos tipicos + 2 jugos naturales",
+  "total": 17.0
+}
+```
+
 #### PATCH /api/v1/food-orders/:id/status
 Actualiza el estado de la comanda (Pendiente | En preparacion | En camino | Entregado | Cancelado).
+
+#### DELETE /api/v1/food-orders/:id
+Elimina una comanda del sistema.
 
 ---
 
@@ -452,8 +495,14 @@ Crea una nueva solicitud con desglose de prendas.
 ```
 - Regla de Negocio: La API calcula automaticamente el total de prendas (6 prendas) y el importe exacto basado en la tarifa de $0.50 por prenda ($3.00 en total).
 
+#### PUT /api/v1/laundry/:id
+Actualiza la orden de lavanderia (prendas, observaciones o destino). Si se modifican las prendas, recalcula automaticamente el total y conteo a $0.50 por prenda.
+
 #### PATCH /api/v1/laundry/:id/status
 Actualiza el estado (Pendiente | En proceso | Listo | Entregado | Cancelado).
+
+#### DELETE /api/v1/laundry/:id
+Elimina una orden de lavanderia del sistema.
 
 ---
 
@@ -505,7 +554,7 @@ Lista el historial de todos los cierres de caja realizados.
 
 ## Suite de Pruebas Automatizadas (QA)
 
-El proyecto incluye 33 pruebas automatizadas que garantizan que ningun cambio rompa la logica del negocio:
+El proyecto incluye **44 pruebas automatizadas** que garantizan que ningun cambio rompa la logica del negocio ni las operaciones CRUD:
 
 Para correr las pruebas:
 ```bash
@@ -514,13 +563,13 @@ npm test
 
 ### Resumen de Pruebas:
 - auth.service.test.ts (5 pruebas): Login exitoso, rechazo por contrasena erronea, rechazo por usuario inexistente, hasheo de contrasenas y deteccion de duplicados.
-- guest.service.test.ts (5 pruebas): Listado, filtrado, creacion, validacion de fechas de salida no anteriores a entrada y actualizacion de estancia.
-- billing.service.test.ts (5 pruebas): Totales iniciales, creacion de cuenta, abono parcial, liquidacion total y rechazo de sobrepagos.
-- food-order.service.test.ts (3 pruebas): Creacion con correlativo, ciclo de estados de comanda.
-- laundry.service.test.ts (3 pruebas): Tarificacion automatica ($0.50/prenda), cambio de estado y rechazo de solicitudes sin prendas.
+- guest.service.test.ts (7 pruebas): Listado, filtrado, creacion, validacion de fechas de salida, actualizacion de estancia, actualizacion completa (PUT) y eliminacion (DELETE).
+- billing.service.test.ts (8 pruebas): Totales iniciales, creacion de cuenta, abono parcial, liquidacion total, rechazo de sobrepagos, actualizacion (PUT) con recalculo de saldos, proteccion contable contra borrado de cuentas con abonos y eliminacion limpia de cuentas sin abono (DELETE).
+- food-order.service.test.ts (5 pruebas): Creacion con correlativo, ciclo de estados de comanda, edicion (PUT) y eliminacion (DELETE).
+- laundry.service.test.ts (5 pruebas): Tarificacion automatica ($0.50/prenda), cambio de estado, rechazo de solicitudes sin prendas, edicion de lote con recalculo automatico (PUT) y eliminacion (DELETE).
 - cash.service.test.ts (5 pruebas): Apertura, bloqueo de turnos dobles, movimientos, limite de egresos en efectivo, arqueo y diferencia de caja.
 - dashboard.service.test.ts (1 prueba): Agregacion simultanea de metricas multi-repositorio.
-- api.test.ts (6 pruebas E2E): Health check, login HTTP, rechazo de rutas sin token, acceso con Bearer token y respuestas semanticas 404.
+- api.test.ts (8 pruebas E2E): Health check, login HTTP, rechazo de rutas sin token, acceso con Bearer token, listado de huespedes, actualizacion HTTP (PUT), eliminacion HTTP (DELETE) y respuestas semanticas 404.
 
 ---
 

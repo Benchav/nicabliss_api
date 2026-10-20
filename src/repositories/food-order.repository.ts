@@ -75,4 +75,12 @@ export class FoodOrderRepository {
     `);
     return Number(result.rows[0].count);
   }
+
+  public async delete(id: number): Promise<boolean> {
+    const result = await dbClient.execute({
+      sql: `DELETE FROM food_orders WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
+  }
 }

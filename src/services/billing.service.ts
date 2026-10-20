@@ -1,5 +1,5 @@
 import { BillingRepository } from "../repositories/billing.repository.js";
-import { CreateBillingAccountDto, RecordPaymentDto } from "../dtos/billing.dto.js";
+import { CreateBillingAccountDto, UpdateBillingAccountDto, RecordPaymentDto } from "../dtos/billing.dto.js";
 import { BillingModel } from "../models/billing.model.js";
 
 export class BillingService {
@@ -41,6 +41,34 @@ export class BillingService {
     return newAccount;
   }
 
+  public async update(id: number, dto: UpdateBillingAccountDto): Promise<BillingModel> {
+    const account = await this.getById(id);
+
+    if (dto.total !== undefined) {
+      const newTotal = Number(dto.total);
+      if (newTotal <= 0) {
+        throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El total debe ser mayor a 0" };
+      }
+      if (newTotal < account.pagado) {
+        throw {
+          statusCode: 400,
+          code: "VALIDATION_ERROR",
+          message: `El nuevo total ($${newTotal}) no puede ser menor a lo ya pagado ($${account.pagado})`,
+        };
+      }
+      account.total = newTotal;
+      account.saldo = Number((newTotal - account.pagado).toFixed(2));
+      account.estado = account.saldo === 0 ? "Pagado" : (account.pagado > 0 ? "Parcial" : "Pendiente");
+    }
+
+    if (dto.huesped !== undefined) account.huesped = dto.huesped.trim();
+    if (dto.habitacion !== undefined) account.habitacion = dto.habitacion.trim();
+    if (dto.concepto !== undefined) account.concepto = dto.concepto.trim();
+
+    await this.billingRepo.save(account);
+    return account;
+  }
+
   public async recordPayment(id: number, dto: RecordPaymentDto): Promise<BillingModel> {
     const account = await this.getById(id);
     const amount = Number(dto.monto);
@@ -58,5 +86,20 @@ export class BillingService {
 
     await this.billingRepo.save(account);
     return account;
+  }
+
+  public async delete(id: number): Promise<void> {
+    const account = await this.getById(id);
+    if (account.pagado > 0) {
+      throw {
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        message: `No se puede eliminar la cuenta #${id} porque tiene abonos registrados ($${account.pagado}). Debe anularse contablemente.`,
+      };
+    }
+    const deleted = await this.billingRepo.delete(id);
+    if (!deleted) {
+      throw { statusCode: 500, code: "INTERNAL_ERROR", message: "No se pudo eliminar la cuenta de cobro" };
+    }
   }
 }

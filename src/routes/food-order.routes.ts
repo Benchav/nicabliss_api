@@ -13,4 +13,6 @@ foodOrderRouter.use(authMiddleware);
 foodOrderRouter.get("/", foodOrderController.getAll);
 foodOrderRouter.get("/:id", foodOrderController.getById);
 foodOrderRouter.post("/", foodOrderController.create);
+foodOrderRouter.put("/:id", foodOrderController.update);
 foodOrderRouter.patch("/:id/status", foodOrderController.updateStatus);
+foodOrderRouter.delete("/:id", foodOrderController.delete);

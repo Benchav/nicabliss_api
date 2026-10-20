@@ -7,6 +7,14 @@ export interface CreateFoodOrderDto {
   total: number;
 }
 
+export interface UpdateFoodOrderDto {
+  huesped?: string;
+  habitacion?: string;
+  productos?: string;
+  total?: number;
+  estado?: EstadoPedido;
+}
+
 export interface UpdateOrderStatusDto {
   estado: EstadoPedido;
 }

@@ -26,10 +26,24 @@ export class FoodOrderController {
     } catch (err) { next(err); }
   };
 
+  public update = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.orderService.update(Number(req.params.id), req.body);
+      res.json({ success: true, data });
+    } catch (err) { next(err); }
+  };
+
   public updateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await this.orderService.updateStatus(Number(req.params.id), req.body);
       res.json({ success: true, data });
+    } catch (err) { next(err); }
+  };
+
+  public delete = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await this.orderService.delete(Number(req.params.id));
+      res.json({ success: true, message: `Pedido #${req.params.id} eliminado correctamente` });
     } catch (err) { next(err); }
   };
 }

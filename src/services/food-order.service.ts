@@ -1,5 +1,5 @@
 import { FoodOrderRepository } from "../repositories/food-order.repository.js";
-import { CreateFoodOrderDto, UpdateOrderStatusDto } from "../dtos/food-order.dto.js";
+import { CreateFoodOrderDto, UpdateFoodOrderDto, UpdateOrderStatusDto } from "../dtos/food-order.dto.js";
 import { FoodOrderModel } from "../models/food-order.model.js";
 
 export class FoodOrderService {
@@ -35,10 +35,37 @@ export class FoodOrderService {
     return newOrder;
   }
 
+  public async update(id: number, dto: UpdateFoodOrderDto): Promise<FoodOrderModel> {
+    const order = await this.getById(id);
+
+    if (dto.huesped !== undefined) order.huesped = dto.huesped.trim();
+    if (dto.habitacion !== undefined) order.habitacion = dto.habitacion.trim();
+    if (dto.productos !== undefined) order.productos = dto.productos.trim();
+    if (dto.total !== undefined) {
+      const newTotal = Number(dto.total);
+      if (newTotal < 0) {
+        throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El total del pedido no puede ser negativo" };
+      }
+      order.total = newTotal;
+    }
+    if (dto.estado !== undefined) order.estado = dto.estado;
+
+    await this.orderRepo.save(order);
+    return order;
+  }
+
   public async updateStatus(id: number, dto: UpdateOrderStatusDto): Promise<FoodOrderModel> {
     const order = await this.getById(id);
     order.estado = dto.estado;
     await this.orderRepo.save(order);
     return order;
+  }
+
+  public async delete(id: number): Promise<void> {
+    await this.getById(id);
+    const deleted = await this.orderRepo.delete(id);
+    if (!deleted) {
+      throw { statusCode: 500, code: "INTERNAL_ERROR", message: "No se pudo eliminar el pedido de alimentos" };
+    }
   }
 }

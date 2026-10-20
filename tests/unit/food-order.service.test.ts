@@ -38,4 +38,28 @@ describe("FoodOrderService Unit Tests", () => {
     const entregado = await orderService.updateStatus(101, { estado: "Entregado" });
     assert.equal(entregado.estado, "Entregado");
   });
+
+  it("debe actualizar los datos de una comanda de alimentos (PUT)", async () => {
+    const updated = await orderService.update(101, {
+      productos: "2 desayunos americanos + 1 jugo de naranja",
+      total: 15,
+    });
+    assert.equal(updated.productos, "2 desayunos americanos + 1 jugo de naranja");
+    assert.equal(updated.total, 15);
+  });
+
+  it("debe eliminar una comanda de alimentos existente (DELETE)", async () => {
+    const orden = await orderService.create({
+      huesped: "Para Cancelar",
+      habitacion: "Habitación 05",
+      productos: "1 café",
+      total: 2,
+    });
+    await orderService.delete(orden.id);
+    await assert.rejects(
+      async () => await orderService.getById(orden.id),
+      (err: any) => err.statusCode === 404
+    );
+  });
 });
+

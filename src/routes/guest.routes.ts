@@ -13,4 +13,6 @@ guestRouter.use(authMiddleware);
 guestRouter.get("/", guestController.getAll);
 guestRouter.get("/:id", guestController.getById);
 guestRouter.post("/", guestController.create);
+guestRouter.put("/:id", guestController.update);
 guestRouter.patch("/:id/status", guestController.updateStatus);
+guestRouter.delete("/:id", guestController.delete);

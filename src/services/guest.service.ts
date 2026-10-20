@@ -1,5 +1,5 @@
 import { GuestRepository } from "../repositories/guest.repository.js";
-import { CreateGuestDto, UpdateGuestStatusDto } from "../dtos/guest.dto.js";
+import { CreateGuestDto, UpdateGuestDto, UpdateGuestStatusDto } from "../dtos/guest.dto.js";
 import { GuestModel } from "../models/guest.model.js";
 
 export class GuestService {
@@ -38,10 +38,39 @@ export class GuestService {
     return newGuest;
   }
 
+  public async update(id: number, dto: UpdateGuestDto): Promise<GuestModel> {
+    const guest = await this.getById(id);
+
+    const entrada = dto.entrada ?? guest.entrada;
+    const salida = dto.salida ?? guest.salida;
+
+    if (salida < entrada) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La fecha de salida no puede ser anterior a la de entrada" };
+    }
+
+    if (dto.nombre !== undefined) guest.nombre = dto.nombre.trim();
+    if (dto.documento !== undefined) guest.documento = dto.documento.trim();
+    if (dto.habitacion !== undefined) guest.habitacion = dto.habitacion.trim();
+    if (dto.entrada !== undefined) guest.entrada = dto.entrada;
+    if (dto.salida !== undefined) guest.salida = dto.salida;
+    if (dto.estado !== undefined) guest.estado = dto.estado;
+
+    await this.guestRepo.save(guest);
+    return guest;
+  }
+
   public async updateStatus(id: number, dto: UpdateGuestStatusDto): Promise<GuestModel> {
     const guest = await this.getById(id);
     guest.estado = dto.estado;
     await this.guestRepo.save(guest);
     return guest;
+  }
+
+  public async delete(id: number): Promise<void> {
+    await this.getById(id);
+    const deleted = await this.guestRepo.delete(id);
+    if (!deleted) {
+      throw { statusCode: 500, code: "INTERNAL_ERROR", message: "No se pudo eliminar el huésped" };
+    }
   }
 }
