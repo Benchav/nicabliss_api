@@ -9,12 +9,30 @@ import { apiRouter } from "./routes/index.js";
 export function createApp(): Application {
   const app = express();
 
+  // Normalización de rutas para despliegues Serverless (Vercel) y proxies reversos
+  app.use((req: Request, _res: Response, next) => {
+    const originalPath =
+      (req.headers["x-matched-path"] as string) ||
+      (req.headers["x-vercel-original-url"] as string);
+
+    if (originalPath && !originalPath.includes("api/index")) {
+      req.url = originalPath;
+    } else if (req.url.startsWith("/api/index")) {
+      req.url = req.url.replace(/^\/api\/index/, "") || "/";
+    }
+    next();
+  });
+
   // Seguridad HTTP y CORS
   app.use(helmet());
   app.use(cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      if (config.cors.origin.includes(origin) || config.cors.origin.includes("*")) {
+      if (
+        config.cors.origin.includes(origin) ||
+        config.cors.origin.includes("*") ||
+        origin.endsWith(".vercel.app")
+      ) {
         return callback(null, true);
       }
       return callback(null, true);
@@ -24,10 +42,28 @@ export function createApp(): Application {
     allowedHeaders: ["Content-Type", "Authorization"],
   }));
 
+  // Manejo explícito de preflight OPTIONS
+  app.options("*", cors());
+
   // Body parsers y log de peticiones
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
   app.use(requestLogger);
+
+  // Endpoint raíz informativo
+  app.get("/", (_req: Request, res: Response) => {
+    res.status(200).json({
+      status: "ok",
+      name: "Nicabliss Hotel Management API",
+      environment: config.nodeEnv,
+      version: "1.0.0",
+      endpoints: {
+        health: "/health",
+        api: "/api/v1",
+      },
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // Health check público
   app.get("/health", (_req: Request, res: Response) => {

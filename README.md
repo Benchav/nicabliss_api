@@ -24,6 +24,7 @@ Backend RESTful empresarial de alto rendimiento para el sistema de gestion hotel
 8. [Suite de Pruebas Automatizadas (QA)](#suite-de-pruebas-automatizadas-qa)
 9. [Seguridad y Politicas](#seguridad-y-politicas)
 10. [Base de Datos Turso Web (LibSQL) y Diagrama ER](#base-de-datos-turso-web-libsql-y-diagrama-er)
+11. [Despliegue en Vercel (Arquitectura Serverless)](#11-despliegue-en-vercel-arquitectura-serverless)
 
 ---
 
@@ -782,3 +783,60 @@ erDiagram
 | `npm run db:migrate` | Ejecuta el esquema DDL relacional (`src/db/schema.sql`) en Turso. |
 | `npm run db:seed` | Puebla los datos iniciales necesarios si las tablas estan vacias. |
 | `npm start` / `npm run dev` | Inicializa automaticamente las migraciones y seeds durante el bootstrap del servidor. |
+
+---
+
+## 11. Despliegue en Vercel (Arquitectura Serverless)
+
+La API cuenta con soporte completo y optimizado para ejecutarse en la infraestructura Serverless de Vercel.
+
+### 1. Archivos de Configuracion
+
+- `vercel.json`: Regla de reescritura que redirige todo el trafico `/(.*)` hacia la funcion serverless `/api/index`.
+- `api/index.ts`: Punto de entrada Serverless que exporta la aplicacion Express configurada.
+- `.vercelignore`: Exclusiones para aligerar el empaquetado (omite bases de datos locales, pruebas y dependencias superfluas).
+
+### 2. Variables de Entorno en Vercel
+
+En el panel de administracion de Vercel (Project Settings > Environment Variables), configure las siguientes variables de produccion:
+
+| Variable | Descripcion | Valor de Ejemplo |
+| :--- | :--- | :--- |
+| `NODE_ENV` | Modo de entorno | `production` |
+| `JWT_SECRET` | Clave secreta para firma de tokens Bearer | `clave_secreta_alta_entropia` |
+| `JWT_EXPIRES_IN` | Caducidad de la sesion | `8h` |
+| `CORS_ORIGIN` | Origenes permitidos del frontend (separados por coma) | `https://tu-frontend.vercel.app` |
+| `TURSO_DATABASE_URL` | URL de la base de datos Turso | `libsql://tu-base-datos.turso.io` |
+| `TURSO_AUTH_TOKEN` | Token de autenticacion de Turso | `eyJhbGciOi...` |
+
+### 3. Inicializacion de Base de Datos en Turso
+
+Dado que el entorno de ejecucion Serverless es efimero y con sistema de archivos de solo lectura, la creacion de tablas (DDL) y la carga de datos iniciales se realizan desde su maquina local contra la base de datos de Turso antes de realizar el despliegue:
+
+```bash
+# Ejecutar migraciones DDL contra Turso
+npm run db:migrate
+
+# Cargar datos iniciales
+npm run db:seed
+```
+
+### 4. Procedimiento de Despliegue
+
+#### Opcion A: Integracion Continua con GitHub (Recomendado)
+1. Confirme y suba sus cambios a la rama principal en GitHub.
+2. En la consola de Vercel, importe el repositorio `nicabliss_api`.
+3. Configure las variables de entorno detalladas en la seccion anterior.
+4. Haga clic en **Deploy**.
+
+#### Opcion B: Despliegue mediante Vercel CLI
+```bash
+# Autenticarse en Vercel
+npx vercel login
+
+# Despliegue de prueba (Preview)
+npx vercel
+
+# Despliegue a produccion
+npx vercel --prod
+```

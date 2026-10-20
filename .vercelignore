@@ -1,0 +1,13 @@
+.git
+.github
+tests/
+*.test.ts
+local.db
+local.db-journal
+test.db
+test.db-journal
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
