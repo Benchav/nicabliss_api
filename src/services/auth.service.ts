@@ -7,11 +7,12 @@ export class AuthService {
   constructor(private userRepo: UserRepository) {}
 
   public async login(dto: LoginDto): Promise<LoginResponseDto> {
-    if (!dto.usuario || !dto.password) {
+    const userIdentifier = dto.usuario || dto.username;
+    if (!userIdentifier || !dto.password) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Usuario y contraseña son obligatorios" };
     }
 
-    const user = await this.userRepo.findByUsername(dto.usuario);
+    const user = await this.userRepo.findByUsername(userIdentifier);
     if (!user) {
       throw { statusCode: 401, code: "UNAUTHORIZED", message: "Usuario o contraseña incorrectos" };
     }

@@ -1,7 +1,8 @@
 import { UserRole } from "../models/user.model.js";
 
 export interface LoginDto {
-  usuario: string;
+  usuario?: string;
+  username?: string;
   password: string;
 }
 
