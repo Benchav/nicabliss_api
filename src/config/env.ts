@@ -11,4 +11,8 @@ export const config = {
   cors: {
     origin: (process.env.CORS_ORIGIN || "http://localhost:5173").split(",").map(o => o.trim()),
   },
+  turso: {
+    url: process.env.TURSO_DATABASE_URL || ":memory:",
+    authToken: process.env.TURSO_AUTH_TOKEN || "",
+  },
 };

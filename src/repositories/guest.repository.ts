@@ -1,43 +1,76 @@
-import { GuestModel } from "../models/guest.model.js";
+import { GuestModel, EstadoEstancia } from "../models/guest.model.js";
+import { dbClient } from "../db/client.js";
+
+function mapRowToGuest(row: any): GuestModel {
+  return {
+    id: Number(row.id),
+    nombre: String(row.nombre),
+    documento: String(row.documento),
+    habitacion: String(row.habitacion),
+    entrada: String(row.entrada),
+    salida: String(row.salida),
+    estado: row.estado as EstadoEstancia,
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+  };
+}
 
 export class GuestRepository {
-  private guests: Map<number, GuestModel> = new Map();
-
-  constructor() {
-    this.seed();
-  }
-
-  private seed(): void {
-    const initial: GuestModel[] = [
-      { id: 1, nombre: "María González", documento: "001-150298-0001A", habitacion: "Habitación 01", entrada: "2026-10-17", salida: "2026-10-20", estado: "Activo" },
-      { id: 2, nombre: "Carlos Mendoza", documento: "001-230195-0002B", habitacion: "Habitación 04", entrada: "2026-10-18", salida: "2026-10-22", estado: "Activo" },
-      { id: 3, nombre: "Sophie Laurent", documento: "P12345678", habitacion: "Habitación 07", entrada: "2026-10-15", salida: "2026-10-19", estado: "Finalizado" },
-      { id: 4, nombre: "James Wilson", documento: "P87654321", habitacion: "Habitación 03", entrada: "2026-10-21", salida: "2026-10-25", estado: "Reservado" },
-    ];
-    for (const g of initial) {
-      this.guests.set(g.id, g);
-    }
-  }
-
   public async findAll(search?: string): Promise<GuestModel[]> {
-    const all = Array.from(this.guests.values());
-    if (!search?.trim()) return all.map(g => ({ ...g }));
-    const term = search.toLowerCase().trim();
-    return all
-      .filter(g => `${g.nombre} ${g.documento} ${g.habitacion}`.toLowerCase().includes(term))
-      .map(g => ({ ...g }));
+    if (search && search.trim().length > 0) {
+      const term = `%${search.toLowerCase().trim()}%`;
+      const result = await dbClient.execute({
+        sql: `SELECT * FROM guests
+              WHERE LOWER(nombre) LIKE ?
+                 OR LOWER(documento) LIKE ?
+                 OR LOWER(habitacion) LIKE ?
+              ORDER BY id ASC;`,
+        args: [term, term, term],
+      });
+      return result.rows.map(mapRowToGuest);
+    }
+
+    const result = await dbClient.execute(`SELECT * FROM guests ORDER BY id ASC;`);
+    return result.rows.map(mapRowToGuest);
   }
 
   public async findById(id: number): Promise<GuestModel | null> {
-    const g = this.guests.get(id);
-    return g ? { ...g } : null;
+    const result = await dbClient.execute({
+      sql: `SELECT * FROM guests WHERE id = ? LIMIT 1;`,
+      args: [id],
+    });
+    if (result.rows.length === 0) return null;
+    return mapRowToGuest(result.rows[0]);
   }
 
   public async save(guest: GuestModel): Promise<void> {
-    this.guests.set(guest.id, { ...guest });
+    await dbClient.execute({
+      sql: `INSERT INTO guests (id, nombre, documento, habitacion, entrada, salida, estado, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              nombre = excluded.nombre,
+              documento = excluded.documento,
+              habitacion = excluded.habitacion,
+              entrada = excluded.entrada,
+              salida = excluded.salida,
+              estado = excluded.estado;`,
+      args: [
+        guest.id,
+        guest.nombre,
+        guest.documento,
+        guest.habitacion,
+        guest.entrada,
+        guest.salida,
+        guest.estado,
+        guest.createdAt || new Date().toISOString(),
+      ],
+    });
   }
 
   public async delete(id: number): Promise<boolean> {
-    return this.guests.delete(id);
+    const result = await dbClient.execute({
+      sql: `DELETE FROM guests WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
   }
 }
