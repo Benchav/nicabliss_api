@@ -1,48 +1,86 @@
-import { BillingModel } from "../models/billing.model.js";
+import { BillingModel, EstadoCobro } from "../models/billing.model.js";
+import { dbClient } from "../db/client.js";
+
+function mapRowToBilling(row: any): BillingModel {
+  return {
+    id: Number(row.id),
+    huesped: String(row.huesped),
+    habitacion: String(row.habitacion),
+    concepto: String(row.concepto),
+    total: Number(row.total),
+    pagado: Number(row.pagado),
+    saldo: Number(row.saldo),
+    estado: row.estado as EstadoCobro,
+    fecha: String(row.fecha),
+  };
+}
 
 export class BillingRepository {
-  private accounts: Map<number, BillingModel> = new Map();
-
-  constructor() {
-    this.seed();
-  }
-
-  private seed(): void {
-    const initial: BillingModel[] = [
-      { id: 1001, huesped: "María González", habitacion: "Habitación 01", concepto: "Hospedaje", total: 40, pagado: 40, saldo: 0, estado: "Pagado", fecha: "2026-10-19" },
-      { id: 1002, huesped: "Carlos Mendoza", habitacion: "Habitación 04", concepto: "Alimentación", total: 12.5, pagado: 0, saldo: 12.5, estado: "Pendiente", fecha: "2026-10-19" },
-      { id: 1003, huesped: "Sophie Laurent", habitacion: "Habitación 07", concepto: "Lavandería", total: 8, pagado: 3, saldo: 5, estado: "Parcial", fecha: "2026-10-19" },
-    ];
-    for (const a of initial) {
-      this.accounts.set(a.id, a);
-    }
-  }
-
   public async findAll(search?: string): Promise<BillingModel[]> {
-    const all = Array.from(this.accounts.values());
-    if (!search?.trim()) return all.map(a => ({ ...a }));
-    const term = search.toLowerCase().trim();
-    return all
-      .filter(a => `${a.huesped} ${a.habitacion} ${a.concepto}`.toLowerCase().includes(term))
-      .map(a => ({ ...a }));
+    if (search && search.trim().length > 0) {
+      const term = `%${search.toLowerCase().trim()}%`;
+      const result = await dbClient.execute({
+        sql: `SELECT * FROM billing_accounts
+              WHERE LOWER(huesped) LIKE ?
+                 OR LOWER(habitacion) LIKE ?
+                 OR LOWER(concepto) LIKE ?
+              ORDER BY id ASC;`,
+        args: [term, term, term],
+      });
+      return result.rows.map(mapRowToBilling);
+    }
+
+    const result = await dbClient.execute(`SELECT * FROM billing_accounts ORDER BY id ASC;`);
+    return result.rows.map(mapRowToBilling);
   }
 
   public async findById(id: number): Promise<BillingModel | null> {
-    const a = this.accounts.get(id);
-    return a ? { ...a } : null;
+    const result = await dbClient.execute({
+      sql: `SELECT * FROM billing_accounts WHERE id = ? LIMIT 1;`,
+      args: [id],
+    });
+    if (result.rows.length === 0) return null;
+    return mapRowToBilling(result.rows[0]);
   }
 
   public async save(account: BillingModel): Promise<void> {
-    this.accounts.set(account.id, { ...account });
+    await dbClient.execute({
+      sql: `INSERT INTO billing_accounts (id, huesped, habitacion, concepto, total, pagado, saldo, estado, fecha)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              huesped = excluded.huesped,
+              habitacion = excluded.habitacion,
+              concepto = excluded.concepto,
+              total = excluded.total,
+              pagado = excluded.pagado,
+              saldo = excluded.saldo,
+              estado = excluded.estado,
+              fecha = excluded.fecha;`,
+      args: [
+        account.id,
+        account.huesped,
+        account.habitacion,
+        account.concepto,
+        account.total,
+        account.pagado,
+        account.saldo,
+        account.estado,
+        account.fecha,
+      ],
+    });
   }
 
-  public async getTotals() {
-    let facturado = 0;
-    let cobrado = 0;
-    for (const a of this.accounts.values()) {
-      facturado += a.total;
-      cobrado += a.pagado;
-    }
+  public async getTotals(): Promise<{ totalFacturado: number; totalCobrado: number; saldoPendiente: number }> {
+    const result = await dbClient.execute(`
+      SELECT 
+        COALESCE(SUM(total), 0) as facturado,
+        COALESCE(SUM(pagado), 0) as cobrado
+      FROM billing_accounts;
+    `);
+
+    const facturado = Number(result.rows[0].facturado);
+    const cobrado = Number(result.rows[0].cobrado);
+
     return {
       totalFacturado: Number(facturado.toFixed(2)),
       totalCobrado: Number(cobrado.toFixed(2)),

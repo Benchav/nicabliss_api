@@ -1,48 +1,78 @@
-import { FoodOrderModel } from "../models/food-order.model.js";
+import { FoodOrderModel, EstadoPedido } from "../models/food-order.model.js";
+import { dbClient } from "../db/client.js";
+
+function mapRowToFoodOrder(row: any): FoodOrderModel {
+  return {
+    id: Number(row.id),
+    orderCode: String(row.order_code),
+    huesped: String(row.huesped),
+    habitacion: String(row.habitacion),
+    productos: String(row.productos),
+    total: Number(row.total),
+    estado: row.estado as EstadoPedido,
+    fecha: String(row.fecha),
+  };
+}
 
 export class FoodOrderRepository {
-  private orders: Map<number, FoodOrderModel> = new Map();
-
-  constructor() {
-    this.seed();
-  }
-
-  private seed(): void {
-    const initial: FoodOrderModel[] = [
-      { id: 101, orderCode: "#PED-024", huesped: "María González", habitacion: "Habitación 01", productos: "2 desayunos americanos", total: 12, estado: "Pendiente", fecha: "19/10/2026" },
-      { id: 102, orderCode: "#PED-023", huesped: "Carlos Mendoza", habitacion: "Habitación 04", productos: "1 sándwich y 1 café", total: 7.5, estado: "En preparación", fecha: "19/10/2026" },
-      { id: 103, orderCode: "#PED-022", huesped: "Sophie Laurent", habitacion: "Habitación 07", productos: "1 desayuno continental", total: 6, estado: "Entregado", fecha: "19/10/2026" },
-    ];
-    for (const o of initial) {
-      this.orders.set(o.id, o);
-    }
-  }
-
   public async findAll(search?: string): Promise<FoodOrderModel[]> {
-    const all = Array.from(this.orders.values());
-    if (!search?.trim()) return all.map(o => ({ ...o }));
-    const term = search.toLowerCase().trim();
-    return all
-      .filter(o => `${o.huesped} ${o.habitacion} ${o.orderCode} ${o.productos}`.toLowerCase().includes(term))
-      .map(o => ({ ...o }));
+    if (search && search.trim().length > 0) {
+      const term = `%${search.toLowerCase().trim()}%`;
+      const result = await dbClient.execute({
+        sql: `SELECT * FROM food_orders
+              WHERE LOWER(order_code) LIKE ?
+                 OR LOWER(huesped) LIKE ?
+                 OR LOWER(habitacion) LIKE ?
+                 OR LOWER(productos) LIKE ?
+              ORDER BY id DESC;`,
+        args: [term, term, term, term],
+      });
+      return result.rows.map(mapRowToFoodOrder);
+    }
+
+    const result = await dbClient.execute(`SELECT * FROM food_orders ORDER BY id DESC;`);
+    return result.rows.map(mapRowToFoodOrder);
   }
 
   public async findById(id: number): Promise<FoodOrderModel | null> {
-    const o = this.orders.get(id);
-    return o ? { ...o } : null;
+    const result = await dbClient.execute({
+      sql: `SELECT * FROM food_orders WHERE id = ? LIMIT 1;`,
+      args: [id],
+    });
+    if (result.rows.length === 0) return null;
+    return mapRowToFoodOrder(result.rows[0]);
   }
 
   public async save(order: FoodOrderModel): Promise<void> {
-    this.orders.set(order.id, { ...order });
+    await dbClient.execute({
+      sql: `INSERT INTO food_orders (id, order_code, huesped, habitacion, productos, total, estado, fecha)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              order_code = excluded.order_code,
+              huesped = excluded.huesped,
+              habitacion = excluded.habitacion,
+              productos = excluded.productos,
+              total = excluded.total,
+              estado = excluded.estado,
+              fecha = excluded.fecha;`,
+      args: [
+        order.id,
+        order.orderCode,
+        order.huesped,
+        order.habitacion,
+        order.productos,
+        order.total,
+        order.estado,
+        order.fecha,
+      ],
+    });
   }
 
   public async countPending(): Promise<number> {
-    let count = 0;
-    for (const o of this.orders.values()) {
-      if (o.estado === "Pendiente" || o.estado === "En preparación" || o.estado === "En camino") {
-        count++;
-      }
-    }
-    return count;
+    const result = await dbClient.execute(`
+      SELECT COUNT(*) as count FROM food_orders
+      WHERE estado IN ('Pendiente', 'En preparación');
+    `);
+    return Number(result.rows[0].count);
   }
 }
