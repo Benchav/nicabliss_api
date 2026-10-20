@@ -50,4 +50,28 @@ describe("LaundryService Unit Tests", () => {
       }
     );
   });
+
+  it("debe actualizar una orden de lavandería y recalcular costo automáticamente (PUT)", async () => {
+    const updated = await laundryService.update(1001, {
+      prendas: [{ tipo: "Vestido", cantidad: 2 }],
+      observaciones: "Entrega urgente",
+    });
+    assert.equal(updated.totalPrendas, 2);
+    assert.equal(updated.total, 1.0);
+    assert.equal(updated.observaciones, "Entrega urgente");
+  });
+
+  it("debe eliminar una orden de lavandería existente (DELETE)", async () => {
+    const nueva = await laundryService.create({
+      huesped: "Para Eliminar",
+      habitacion: "Habitación 08",
+      prendas: [{ tipo: "Camisa", cantidad: 1 }],
+    });
+    await laundryService.delete(nueva.id);
+    await assert.rejects(
+      async () => await laundryService.getById(nueva.id),
+      (err: any) => err.statusCode === 404
+    );
+  });
 });
+

@@ -80,4 +80,144 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.status, 404);
     assert.equal(res.body.error.code, "NOT_FOUND");
   });
+
+  it("PUT /api/v1/guests/:id -> actualiza huésped con 200 OK", async () => {
+    const res = await api("/api/v1/guests/1", {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ habitacion: "Habitación 10" }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.data.habitacion, "Habitación 10");
+  });
+
+  it("DELETE /api/v1/guests/:id -> elimina huésped con 200 OK", async () => {
+    const createRes = await api("/api/v1/guests", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        nombre: "Test Delete E2E",
+        documento: "P-E2E-99",
+        habitacion: "Habitación 99",
+        entrada: "2026-10-20",
+        salida: "2026-10-21",
+      }),
+    });
+    const guestId = createRes.body.data.id;
+
+    const deleteRes = await api(`/api/v1/guests/${guestId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    assert.equal(deleteRes.status, 200);
+    assert.equal(deleteRes.body.success, true);
+  });
+
+  // --- Tests de Gestión de Usuarios y Roles (RBAC) ---
+  it("GET /api/v1/users -> rechaza 401 sin autenticación", async () => {
+    const res = await api("/api/v1/users");
+    assert.equal(res.status, 401);
+  });
+
+  it("GET /api/v1/users -> retorna 200 OK con lista de usuarios para rol ADMIN", async () => {
+    const res = await api("/api/v1/users", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.ok(Array.isArray(res.body.data));
+    assert.ok(res.body.data.length >= 1);
+  });
+
+  it("POST /api/v1/users -> crea nuevo usuario con rol asignado", async () => {
+    const res = await api("/api/v1/users", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        username: "e2e_receptionist",
+        email: "e2e_rec@nicabliss.com",
+        password: "securePassword123",
+        fullName: "Recepcionista E2E",
+        role: "RECEPTIONIST",
+      }),
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.data.username, "e2e_receptionist");
+    assert.equal(res.body.data.role, "RECEPTIONIST");
+  });
+
+  it("RBAC Check: usuario no ADMIN recibe 403 FORBIDDEN en /api/v1/users", async () => {
+    // Iniciar sesión como recepcionista creado previamente
+    const loginRes = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ usuario: "e2e_receptionist", password: "securePassword123" }),
+    });
+    assert.equal(loginRes.status, 200);
+    const receptionistToken = loginRes.body.data.token;
+
+    // Intentar acceder a /api/v1/users
+    const userRes = await api("/api/v1/users", {
+      headers: { Authorization: `Bearer ${receptionistToken}` },
+    });
+    assert.equal(userRes.status, 403);
+    assert.equal(userRes.body.error.code, "FORBIDDEN");
+  });
+
+  it("PUT /api/v1/users/:id -> actualiza rol y datos de usuario", async () => {
+    // Obtener lista para hallar ID de e2e_receptionist
+    const listRes = await api("/api/v1/users", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const target = listRes.body.data.find((u: any) => u.username === "e2e_receptionist");
+    assert.ok(target);
+
+    const updateRes = await api(`/api/v1/users/${target.id}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({
+        fullName: "Recepcionista Jefe",
+        role: "STAFF",
+      }),
+    });
+
+    assert.equal(updateRes.status, 200);
+    assert.equal(updateRes.body.data.fullName, "Recepcionista Jefe");
+    assert.equal(updateRes.body.data.role, "STAFF");
+  });
+
+  it("DELETE /api/v1/users/:id -> impide auto-eliminación del admin en sesión", async () => {
+    const listRes = await api("/api/v1/users", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const adminUser = listRes.body.data.find((u: any) => u.username === "admin");
+    assert.ok(adminUser);
+
+    const deleteRes = await api(`/api/v1/users/${adminUser.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+
+    assert.equal(deleteRes.status, 400);
+    assert.ok(deleteRes.body.error);
+  });
+
+  it("DELETE /api/v1/users/:id -> elimina usuario regular correctamente", async () => {
+    const listRes = await api("/api/v1/users", {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const target = listRes.body.data.find((u: any) => u.username === "e2e_receptionist");
+    assert.ok(target);
+
+    const deleteRes = await api(`/api/v1/users/${target.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+
+    assert.equal(deleteRes.status, 200);
+    assert.equal(deleteRes.body.success, true);
+  });
 });
+

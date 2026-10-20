@@ -8,8 +8,9 @@ describe("AuthService Unit Tests", () => {
   let userRepo: UserRepository;
   let authService: AuthService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     userRepo = new UserRepository();
+    await userRepo.reset();
     authService = new AuthService(userRepo);
   });
 

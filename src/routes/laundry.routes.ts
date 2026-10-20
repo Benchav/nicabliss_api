@@ -13,4 +13,6 @@ laundryRouter.use(authMiddleware);
 laundryRouter.get("/", laundryController.getAll);
 laundryRouter.get("/:id", laundryController.getById);
 laundryRouter.post("/", laundryController.create);
+laundryRouter.put("/:id", laundryController.update);
 laundryRouter.patch("/:id/status", laundryController.updateStatus);
+laundryRouter.delete("/:id", laundryController.delete);

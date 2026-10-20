@@ -7,8 +7,9 @@ describe("BillingService Unit Tests", () => {
   let billingRepo: BillingRepository;
   let billingService: BillingService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     billingRepo = new BillingRepository();
+    await billingRepo.reset();
     billingService = new BillingService(billingRepo);
   });
 
@@ -62,4 +63,33 @@ describe("BillingService Unit Tests", () => {
       }
     );
   });
+
+  it("debe actualizar una cuenta de cobro y recalcular su saldo (PUT)", async () => {
+    const actualizada = await billingService.update(1001, { total: 60 });
+    assert.equal(actualizada.total, 60);
+    assert.equal(actualizada.saldo, 20);
+    assert.equal(actualizada.estado, "Parcial");
+  });
+
+  it("debe rechazar eliminar una cuenta con pagos registrados (Regla Contable)", async () => {
+    await assert.rejects(
+      async () => await billingService.delete(1001),
+      (err: any) => err.statusCode === 400
+    );
+  });
+
+  it("debe permitir eliminar una cuenta sin pagos registrados (DELETE)", async () => {
+    const nueva = await billingService.create({
+      huesped: "Temporal",
+      habitacion: "Habitación 99",
+      concepto: "Cargo erróneo",
+      total: 30,
+    });
+    await billingService.delete(nueva.id);
+    await assert.rejects(
+      async () => await billingService.getById(nueva.id),
+      (err: any) => err.statusCode === 404
+    );
+  });
 });
+

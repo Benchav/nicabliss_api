@@ -7,6 +7,14 @@ export interface CreateLaundryOrderDto {
   observaciones?: string;
 }
 
+export interface UpdateLaundryOrderDto {
+  huesped?: string;
+  habitacion?: string;
+  prendas?: PrendaItem[];
+  observaciones?: string;
+  estado?: EstadoLavanderia;
+}
+
 export interface UpdateLaundryStatusDto {
   estado: EstadoLavanderia;
 }

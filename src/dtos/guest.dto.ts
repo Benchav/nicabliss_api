@@ -9,6 +9,15 @@ export interface CreateGuestDto {
   estado?: EstadoEstancia;
 }
 
+export interface UpdateGuestDto {
+  nombre?: string;
+  documento?: string;
+  habitacion?: string;
+  entrada?: string;
+  salida?: string;
+  estado?: EstadoEstancia;
+}
+
 export interface UpdateGuestStatusDto {
   estado: EstadoEstancia;
 }

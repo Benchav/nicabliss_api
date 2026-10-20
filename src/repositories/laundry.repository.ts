@@ -1,74 +1,96 @@
-import { LaundryModel } from "../models/laundry.model.js";
+import { LaundryModel, EstadoLavanderia, PrendaItem } from "../models/laundry.model.js";
+import { dbClient } from "../db/client.js";
+
+function mapRowToLaundry(row: any): LaundryModel {
+  let prendas: PrendaItem[] = [];
+  try {
+    prendas = typeof row.prendas === "string" ? JSON.parse(row.prendas) : row.prendas;
+  } catch {
+    prendas = [];
+  }
+
+  return {
+    id: Number(row.id),
+    huesped: String(row.huesped),
+    habitacion: String(row.habitacion),
+    prendas,
+    totalPrendas: Number(row.total_prendas),
+    total: Number(row.total),
+    estado: row.estado as EstadoLavanderia,
+    fecha: String(row.fecha),
+    observaciones: String(row.observaciones || ""),
+  };
+}
 
 export class LaundryRepository {
-  private orders: Map<number, LaundryModel> = new Map();
-
-  constructor() {
-    this.seed();
-  }
-
-  private seed(): void {
-    const initial: LaundryModel[] = [
-      {
-        id: 1001,
-        huesped: "María González",
-        habitacion: "Habitación 01",
-        prendas: [
-          { tipo: "Camisa", cantidad: 2 },
-          { tipo: "Pantalón", cantidad: 1 },
-          { tipo: "Ropa interior", cantidad: 3 },
-        ],
-        totalPrendas: 6,
-        total: 3.0,
-        estado: "Listo",
-        fecha: "19/10/2026",
-        observaciones: "Planchar camisa con cuidado",
-      },
-      {
-        id: 1002,
-        huesped: "Carlos Mendoza",
-        habitacion: "Habitación 04",
-        prendas: [
-          { tipo: "Camiseta", cantidad: 3 },
-          { tipo: "Short", cantidad: 2 },
-        ],
-        totalPrendas: 5,
-        total: 2.5,
-        estado: "En proceso",
-        fecha: "19/10/2026",
-        observaciones: "Entrega urgente antes de las 4 PM",
-      },
-    ];
-    for (const o of initial) {
-      this.orders.set(o.id, o);
-    }
-  }
-
   public async findAll(search?: string): Promise<LaundryModel[]> {
-    const all = Array.from(this.orders.values());
-    if (!search?.trim()) return all.map(o => ({ ...o, prendas: [...o.prendas] }));
-    const term = search.toLowerCase().trim();
-    return all
-      .filter(o => `${o.huesped} ${o.habitacion}`.toLowerCase().includes(term))
-      .map(o => ({ ...o, prendas: [...o.prendas] }));
+    if (search && search.trim().length > 0) {
+      const term = `%${search.toLowerCase().trim()}%`;
+      const result = await dbClient.execute({
+        sql: `SELECT * FROM laundry_orders
+              WHERE LOWER(huesped) LIKE ?
+                 OR LOWER(habitacion) LIKE ?
+                 OR LOWER(observaciones) LIKE ?
+              ORDER BY id DESC;`,
+        args: [term, term, term],
+      });
+      return result.rows.map(mapRowToLaundry);
+    }
+
+    const result = await dbClient.execute(`SELECT * FROM laundry_orders ORDER BY id DESC;`);
+    return result.rows.map(mapRowToLaundry);
   }
 
   public async findById(id: number): Promise<LaundryModel | null> {
-    const o = this.orders.get(id);
-    return o ? { ...o, prendas: [...o.prendas] } : null;
+    const result = await dbClient.execute({
+      sql: `SELECT * FROM laundry_orders WHERE id = ? LIMIT 1;`,
+      args: [id],
+    });
+    if (result.rows.length === 0) return null;
+    return mapRowToLaundry(result.rows[0]);
   }
 
   public async save(order: LaundryModel): Promise<void> {
-    this.orders.set(order.id, { ...order, prendas: [...order.prendas] });
+    const prendasJson = JSON.stringify(order.prendas || []);
+    await dbClient.execute({
+      sql: `INSERT INTO laundry_orders (id, huesped, habitacion, prendas, total_prendas, total, estado, fecha, observaciones)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              huesped = excluded.huesped,
+              habitacion = excluded.habitacion,
+              prendas = excluded.prendas,
+              total_prendas = excluded.total_prendas,
+              total = excluded.total,
+              estado = excluded.estado,
+              fecha = excluded.fecha,
+              observaciones = excluded.observaciones;`,
+      args: [
+        order.id,
+        order.huesped,
+        order.habitacion,
+        prendasJson,
+        order.totalPrendas,
+        order.total,
+        order.estado,
+        order.fecha,
+        order.observaciones,
+      ],
+    });
   }
 
   public async countPending(): Promise<number> {
-    let count = 0;
-    for (const o of this.orders.values()) {
-      if (o.estado === "Pendiente" || o.estado === "En proceso") {
-        count++;
-      }
-    }
-    return count;
+    const result = await dbClient.execute(`
+      SELECT COUNT(*) as count FROM laundry_orders
+      WHERE estado IN ('Pendiente', 'En proceso');
+    `);
+    return Number(result.rows[0].count);
+  }
+
+  public async delete(id: number): Promise<boolean> {
+    const result = await dbClient.execute({
+      sql: `DELETE FROM laundry_orders WHERE id = ?;`,
+      args: [id],
+    });
+    return result.rowsAffected > 0;
   }
 }

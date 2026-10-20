@@ -13,4 +13,6 @@ billingRouter.use(authMiddleware);
 billingRouter.get("/", billingController.getAll);
 billingRouter.get("/:id", billingController.getById);
 billingRouter.post("/", billingController.create);
+billingRouter.put("/:id", billingController.update);
 billingRouter.post("/:id/payments", billingController.recordPayment);
+billingRouter.delete("/:id", billingController.delete);

@@ -26,10 +26,24 @@ export class LaundryController {
     } catch (err) { next(err); }
   };
 
+  public update = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.laundryService.update(Number(req.params.id), req.body);
+      res.json({ success: true, data });
+    } catch (err) { next(err); }
+  };
+
   public updateStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await this.laundryService.updateStatus(Number(req.params.id), req.body);
       res.json({ success: true, data });
+    } catch (err) { next(err); }
+  };
+
+  public delete = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await this.laundryService.delete(Number(req.params.id));
+      res.json({ success: true, message: `Orden de lavandería #${req.params.id} eliminada correctamente` });
     } catch (err) { next(err); }
   };
 }

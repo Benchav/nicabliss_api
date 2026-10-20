@@ -42,6 +42,8 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Temporales
+# Temporales y bases de datos locales de prueba
 tmp/
 temp/
+*.db
+*.db-journal

@@ -7,8 +7,9 @@ describe("GuestService Unit Tests", () => {
   let guestRepo: GuestRepository;
   let guestService: GuestService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     guestRepo = new GuestRepository();
+    await guestRepo.reset();
     guestService = new GuestService(guestRepo);
   });
 
@@ -64,4 +65,29 @@ describe("GuestService Unit Tests", () => {
     const updated = await guestService.updateStatus(1, { estado: "Finalizado" });
     assert.equal(updated.estado, "Finalizado");
   });
+
+  it("debe actualizar los datos de un huésped completamente (PUT)", async () => {
+    const updated = await guestService.update(1, {
+      nombre: "María González Actualizada",
+      habitacion: "Habitación 09",
+    });
+    assert.equal(updated.nombre, "María González Actualizada");
+    assert.equal(updated.habitacion, "Habitación 09");
+  });
+
+  it("debe eliminar un huésped existente (DELETE)", async () => {
+    const nuevo = await guestService.create({
+      nombre: "Huésped Para Borrar",
+      documento: "P-DEL-01",
+      habitacion: "Habitación 99",
+      entrada: "2026-10-20",
+      salida: "2026-10-22",
+    });
+    await guestService.delete(nuevo.id);
+    await assert.rejects(
+      async () => await guestService.getById(nuevo.id),
+      (err: any) => err.statusCode === 404
+    );
+  });
 });
+
