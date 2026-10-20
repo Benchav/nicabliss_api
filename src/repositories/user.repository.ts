@@ -69,4 +69,8 @@ export class UserRepository {
     const result = await dbClient.execute(`SELECT * FROM users ORDER BY created_at DESC;`);
     return result.rows.map(mapRowToUser);
   }
+
+  public async reset(): Promise<void> {
+    await dbClient.execute(`DELETE FROM users WHERE username != 'admin';`);
+  }
 }

@@ -1,22 +1,35 @@
 import { createApp } from "./app.js";
 import { config } from "./config/env.js";
 import { Logger } from "./utils/logger.js";
+import { runMigrations } from "./db/migrate.js";
+import { runSeeds } from "./db/seed.js";
 
-const app = createApp();
+async function bootstrap(): Promise<void> {
+  try {
+    await runMigrations();
+    await runSeeds();
+  } catch (err) {
+    Logger.error("Advertencia durante inicialización de Turso:", err);
+  }
 
-const server = app.listen(config.port, () => {
-  Logger.info(`Nicabliss API lista en el puerto ${config.port} [${config.nodeEnv}]`, "SERVER");
-  Logger.info(`Health check: http://localhost:${config.port}/health`, "SERVER");
-  Logger.info(`Rutas API:   http://localhost:${config.port}/api/v1`, "SERVER");
-});
+  const app = createApp();
 
-const shutdown = (signal: string) => {
-  Logger.info(`Señal ${signal} recibida. Cerrando servidor...`, "SERVER");
-  server.close(() => {
-    Logger.info("Servidor HTTP cerrado.", "SERVER");
-    process.exit(0);
+  const server = app.listen(config.port, () => {
+    Logger.info(`Nicabliss API lista en el puerto ${config.port} [${config.nodeEnv}]`, "SERVER");
+    Logger.info(`Health check: http://localhost:${config.port}/health`, "SERVER");
+    Logger.info(`Rutas API:   http://localhost:${config.port}/api/v1`, "SERVER");
   });
-};
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+  const shutdown = (signal: string) => {
+    Logger.info(`Señal ${signal} recibida. Cerrando servidor...`, "SERVER");
+    server.close(() => {
+      Logger.info("Servidor HTTP cerrado.", "SERVER");
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+}
+
+bootstrap();

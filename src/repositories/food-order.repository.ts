@@ -24,13 +24,13 @@ export class FoodOrderRepository {
                  OR LOWER(huesped) LIKE ?
                  OR LOWER(habitacion) LIKE ?
                  OR LOWER(productos) LIKE ?
-              ORDER BY id DESC;`,
+              ORDER BY id ASC;`,
         args: [term, term, term, term],
       });
       return result.rows.map(mapRowToFoodOrder);
     }
 
-    const result = await dbClient.execute(`SELECT * FROM food_orders ORDER BY id DESC;`);
+    const result = await dbClient.execute(`SELECT * FROM food_orders ORDER BY id ASC;`);
     return result.rows.map(mapRowToFoodOrder);
   }
 

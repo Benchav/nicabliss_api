@@ -87,4 +87,13 @@ export class BillingRepository {
       saldoPendiente: Number((facturado - cobrado).toFixed(2)),
     };
   }
+
+  public async reset(): Promise<void> {
+    await dbClient.execute(`DELETE FROM billing_accounts WHERE id NOT IN (1001, 1002, 1003);`);
+    await dbClient.execute(`
+      UPDATE billing_accounts 
+      SET pagado = 0, saldo = total, estado = 'Pendiente' 
+      WHERE id = 1002;
+    `);
+  }
 }

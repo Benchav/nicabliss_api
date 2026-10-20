@@ -1,6 +1,6 @@
 # Nicabliss API - Hotel Management System (PMS Backend)
 
-Backend RESTful empresarial de alto rendimiento para el sistema de gestion hotelera Nicabliss, construido con Node.js, Express, TypeScript en modo estricto, seguridad JWT, hashing con Bcrypt, persistencia en memoria y una arquitectura en capas limpia, modular y desacoplada.
+Backend RESTful empresarial de alto rendimiento para el sistema de gestion hotelera Nicabliss, construido con Node.js, Express, TypeScript en modo estricto, seguridad JWT, hashing con Bcrypt, persistencia relacional distribuida en el Edge con **Turso Web (LibSQL / SQLite)** y una arquitectura en capas limpia, modular y desacoplada.
 
 ---
 
@@ -23,7 +23,7 @@ Backend RESTful empresarial de alto rendimiento para el sistema de gestion hotel
    - [Caja y Cierres](#8-caja-y-cierres-apiv1cash-register)
 8. [Suite de Pruebas Automatizadas (QA)](#suite-de-pruebas-automatizadas-qa)
 9. [Seguridad y Politicas](#seguridad-y-politicas)
-10. [Guia de Migracion a Base de Datos Relacional](#guia-de-migracion-a-base-de-datos-relacional)
+10. [Base de Datos Turso Web (LibSQL) y Diagrama ER](#base-de-datos-turso-web-libsql-y-diagrama-er)
 
 ---
 
@@ -51,6 +51,7 @@ Nicabliss API centraliza y automatiza todas las operaciones diarias de un hotel 
 | helmet | ^8.0.0 | Configuracion segura de cabeceras HTTP (CSP, noSniff, xssFilter). |
 | cors | ^2.8.5 | Control de acceso HTTP entre origenes (Frontend localhost:5173). |
 | dotenv | ^16.4.7 | Inyeccion y tipado de variables de entorno desde archivos .env. |
+| @libsql/client | ^0.18.0 | Cliente oficial de Turso para conexiones LibSQL/SQLite en el Edge sin binarios C++. |
 | tsx | ^4.19.3 | Ejecucion directa de TypeScript en desarrollo y runner de pruebas ultrarrapido. |
 
 ---
@@ -80,7 +81,12 @@ nicabliss_api/
 |   `-- integration/             # Pruebas de integracion de la API HTTP (E2E)
 |       `-- api.test.ts
 `-- src/
-    |-- config/                  # Configuracion del entorno (env.ts)
+    |-- config/                  # Configuracion del entorno (env.ts con soporte Turso)
+    |-- db/                      # Capa de base de datos Turso LibSQL
+    |   |-- client.ts            # Cliente singleton de conexion a Turso (@libsql/client)
+    |   |-- schema.sql           # Definicion DDL relacional, constraints e indices
+    |   |-- migrate.ts           # Ejecutor automatizado de migraciones DDL
+    |   `-- seed.ts              # Semillero con datos iniciales (admin, huespedes, turnos)
     |-- models/                  # Modelos de datos del dominio y tipos de entidades
     |   |-- user.model.ts        # Usuario, credenciales y roles
     |   |-- guest.model.ts       # Huesped y estancias
@@ -95,7 +101,7 @@ nicabliss_api/
     |   |-- food-order.dto.ts
     |   |-- laundry.dto.ts
     |   `-- cash.dto.ts
-    |-- repositories/            # Almacenamiento en Memoria Thread-Safe
+    |-- repositories/            # Capa de Persistencia Relacional en Turso (LibSQL)
     |   |-- user.repository.ts
     |   |-- guest.repository.ts
     |   |-- billing.repository.ts
@@ -190,6 +196,8 @@ Archivo .env:
 | JWT_SECRET | String | Clave secreta | Clave simetrica utilizada para firmar los tokens JWT. |
 | JWT_EXPIRES_IN | String | 8h | Tiempo de vida de los tokens de sesion. |
 | CORS_ORIGIN | String | http://localhost:5173 | Origenes permitidos separados por comas para el Frontend. |
+| TURSO_DATABASE_URL | String | libsql://...turso.io | URL de conexion a la base de datos distribuida en Turso. |
+| TURSO_AUTH_TOKEN | String | Token JWT firmado | Token de autenticacion con permisos rw para Turso Cloud. |
 
 ---
 
@@ -525,11 +533,127 @@ npm test
 
 ---
 
-## Guia de Migracion a Base de Datos Relacional
+## Base de Datos Turso Web (LibSQL) y Diagrama ER
 
-Actualmente la API almacena sus datos en repositorios en memoria dentro de src/repositories/. Gracias al patron Repository y a la arquitectura en capas:
+La persistencia de **Nicabliss API** esta respaldada por **Turso Web**, un motor de base de datos relacional distribuido en el Edge basado en **LibSQL** (fork moderno y optimizado de SQLite).
 
-1. Para migrar a PostgreSQL / MySQL / MongoDB:
-   - Instala tu ORM preferido (ejemplo: npm install prisma @prisma/client o typeorm).
-   - Modifica unicamente las clases dentro de src/repositories/ para que realicen las consultas SQL correspondientes.
-   - Los controladores, los servicios, los DTOs y las rutas NO requieren ninguna modificacion.
+### 1. Diagrama Entidad-Relacion (ER Diagram)
+
+```mermaid
+erDiagram
+    USERS {
+        TEXT id PK "Identificador único (usr_admin_001 o UUID)"
+        TEXT username UK "Nombre de usuario único para login"
+        TEXT email UK "Correo electrónico corporativo único"
+        TEXT password_hash "Hash bcrypt (10 salt rounds)"
+        TEXT role "Rol RBAC: ADMIN, RECEPTIONIST, STAFF"
+        TEXT full_name "Nombre completo del usuario"
+        TEXT created_at "Timestamp ISO 8601 UTC"
+    }
+
+    GUESTS {
+        INTEGER id PK "Autoincremental"
+        TEXT nombre "Nombre completo del huésped titular"
+        TEXT documento "Cédula o pasaporte"
+        TEXT habitacion "Habitación asignada (ej. Habitación 01)"
+        TEXT entrada "Fecha check-in (YYYY-MM-DD)"
+        TEXT salida "Fecha check-out (YYYY-MM-DD)"
+        TEXT estado "Estado: Activo, Finalizado, Reservado"
+        TEXT created_at "Timestamp de creación"
+    }
+
+    BILLING_ACCOUNTS {
+        INTEGER id PK "Identificador numérico de cuenta"
+        INTEGER guest_id FK "Vínculo suave opcional (SET NULL)"
+        TEXT huesped "Snapshot inmutable del huésped"
+        TEXT habitacion "Snapshot de habitación asignada"
+        TEXT concepto "Concepto de cargo (Hospedaje, etc.)"
+        REAL total "Importe total (> 0)"
+        REAL pagado "Monto abonado (>= 0)"
+        REAL saldo "Saldo pendiente (total - pagado)"
+        TEXT estado "Estado: Pendiente, Parcial, Pagado"
+        TEXT fecha "Fecha de facturación (YYYY-MM-DD)"
+    }
+
+    FOOD_ORDERS {
+        INTEGER id PK "Identificador numérico de comanda"
+        TEXT order_code UK "Código amigable único (#PED-xxx)"
+        INTEGER guest_id FK "Vínculo suave opcional (SET NULL)"
+        TEXT huesped "Nombre del comensal o huésped"
+        TEXT habitacion "Habitación o destino de entrega"
+        TEXT productos "Detalle de platillos y bebidas"
+        REAL total "Importe total de comanda"
+        TEXT estado "Pendiente, En preparación, En camino, Entregado, Cancelado"
+        TEXT fecha "Fecha de la orden"
+    }
+
+    LAUNDRY_ORDERS {
+        INTEGER id PK "Identificador numérico de orden"
+        INTEGER guest_id FK "Vínculo suave opcional (SET NULL)"
+        TEXT huesped "Nombre del huésped solicitante"
+        TEXT habitacion "Habitación de entrega"
+        TEXT prendas "Array JSON con desglose de prendas"
+        INTEGER total_prendas "Conteo de prendas (> 0)"
+        REAL total "Costo total a $0.50 por prenda"
+        TEXT estado "Pendiente, En proceso, Listo, Entregado, Cancelado"
+        TEXT fecha "Fecha de recepción"
+        TEXT observaciones "Instrucciones de planchado/cuidado"
+    }
+
+    CASH_SESSIONS {
+        INTEGER id PK "Identificador de turno de caja"
+        TEXT responsable "Usuario a cargo del turno"
+        TEXT apertura "Fecha y hora de inicio"
+        TEXT cierre "Fecha y hora de cierre (NULL si abierto)"
+        REAL fondo_inicial "Fondo base en efectivo (>= 0)"
+        REAL ingresos_efectivo "Total cobrado en efectivo"
+        REAL ingresos_digitales "Total cobrado en tarjeta/transferencia"
+        REAL salidas_efectivo "Total de egresos/gastos en efectivo"
+        REAL efectivo_esperado "Balance teórico calculado"
+        REAL efectivo_contado "Efectivo físico contado en arqueo"
+        REAL diferencia "Descuadre (efectivoContado - efectivoEsperado)"
+        TEXT observaciones "Notas del cierre"
+        INTEGER is_closed "0: Turno Activo | 1: Turno Cerrado"
+    }
+
+    CASH_MOVEMENTS {
+        INTEGER id PK "Identificador de movimiento"
+        INTEGER session_id FK "Turno asociado (CASCADE)"
+        TEXT fecha "Fecha y hora del movimiento"
+        TEXT tipo "Ingreso o Salida"
+        TEXT concepto "Hospedaje, Alimentos, Lavandería, Gasto, etc."
+        TEXT descripcion "Detalle del movimiento"
+        TEXT metodo "Efectivo, Transferencia o Tarjeta"
+        REAL monto "Importe del movimiento (> 0)"
+    }
+
+    CASH_SESSIONS ||--|{ CASH_MOVEMENTS : "1:N Estricta (ON DELETE CASCADE)"
+    GUESTS ||--o{ BILLING_ACCOUNTS : "1:N Híbrida (SET NULL + Snapshot)"
+    GUESTS ||--o{ FOOD_ORDERS : "1:N Híbrida (SET NULL + Snapshot)"
+    GUESTS ||--o{ LAUNDRY_ORDERS : "1:N Híbrida (SET NULL + Snapshot)"
+```
+
+---
+
+### 2. Arquitectura de Conexiones e Integridad
+
+- **Conexion Segura LibSQL:** `@libsql/client` gestiona peticiones HTTP/WebSocket seguras hacia el cluster de Turso (`libsql://...`), ofreciendo tiempos de respuesta en microsegundos sin requerir compiladores C++ nativos.
+- **Relaciones Fuertes (CASCADE):** Cada registro en `cash_movements` pertenece estrictamente a una sesion de `cash_sessions`.
+- **Patron Snapshot Contable (Inmutabilidad):** Las cuentas de cobro, comandas y lavanderia conservan `huesped` y `habitacion` como copia fija, de forma que el historial fiscal permanece inalterable aunque un huesped finalice su estancia (`ON DELETE SET NULL`).
+- **Indice Unico Parcial Anticoncurrencia:**
+  ```sql
+  CREATE UNIQUE INDEX idx_unique_active_cash_session 
+  ON cash_sessions(is_closed) 
+  WHERE is_closed = 0;
+  ```
+  Garantiza a nivel de motor de base de datos que sea imposible tener dos turnos de caja abiertos simultaneamente, blindando el sistema contra condiciones de carrera.
+
+---
+
+### 3. Comandos de Gestion de Base de Datos
+
+| Comando NPM | Accion |
+| :--- | :--- |
+| `npm run db:migrate` | Ejecuta el esquema DDL relacional (`src/db/schema.sql`) en Turso. |
+| `npm run db:seed` | Puebla los datos iniciales necesarios si las tablas estan vacias. |
+| `npm start` / `npm run dev` | Inicializa automaticamente las migraciones y seeds durante el bootstrap del servidor. |

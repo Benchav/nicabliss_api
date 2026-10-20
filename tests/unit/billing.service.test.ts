@@ -7,8 +7,9 @@ describe("BillingService Unit Tests", () => {
   let billingRepo: BillingRepository;
   let billingService: BillingService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     billingRepo = new BillingRepository();
+    await billingRepo.reset();
     billingService = new BillingService(billingRepo);
   });
 

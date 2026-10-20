@@ -1,14 +1,17 @@
 {
   "name": "nicabliss-api",
   "version": "1.0.0",
-  "description": "Enterprise DDD In-Memory Backend for Nicabliss Hotel PMS",
+  "description": "Enterprise DDD Backend with Turso (LibSQL) for Nicabliss Hotel PMS",
+  "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/**/*.test.ts"
+    "test": "tsx --test tests/**/*.test.ts",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "keywords": [
     "hotel-management",

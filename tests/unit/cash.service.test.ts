@@ -7,8 +7,9 @@ describe("CashService Unit Tests", () => {
   let cashRepo: CashRepository;
   let cashService: CashService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     cashRepo = new CashRepository();
+    await cashRepo.reset();
     cashService = new CashService(cashRepo);
   });
 
