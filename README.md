@@ -1,118 +1,535 @@
-# 🏨 Nicabliss API · Hotel Management Backend
+# Nicabliss API - Hotel Management System (PMS Backend)
 
-Backend empresarial estructurado en **Capas Limpias (Layered Architecture)**, con modelos, controladores, servicios y repositorios en memoria centralizados para una máxima facilidad de lectura y entendimiento.
-
----
-
-## 📂 Estructura del Proyecto
-
-```
-src/
-├── config/                  # Variables de entorno y configuración (env.ts)
-├── models/                  # Todos los Modelos de Datos del sistema
-│   ├── user.model.ts
-│   ├── guest.model.ts
-│   ├── billing.model.ts
-│   ├── food-order.model.ts
-│   ├── laundry.model.ts
-│   └── cash.model.ts
-├── dtos/                    # Contratos de Datos (Data Transfer Objects)
-│   ├── auth.dto.ts
-│   ├── guest.dto.ts
-│   ├── billing.dto.ts
-│   ├── food-order.dto.ts
-│   ├── laundry.dto.ts
-│   └── cash.dto.ts
-├── repositories/            # Almacenamiento en Memoria Thread-safe
-│   ├── user.repository.ts
-│   ├── guest.repository.ts
-│   ├── billing.repository.ts
-│   ├── food-order.repository.ts
-│   ├── laundry.repository.ts
-│   └── cash.repository.ts
-├── services/                # Toda la Lógica de Negocio y Reglas
-│   ├── auth.service.ts
-│   ├── guest.service.ts
-│   ├── billing.service.ts
-│   ├── food-order.service.ts
-│   ├── laundry.service.ts
-│   ├── cash.service.ts
-│   └── dashboard.service.ts
-├── controllers/             # Controladores HTTP (Manejan req y res)
-│   ├── auth.controller.ts
-│   ├── guest.controller.ts
-│   ├── billing.controller.ts
-│   ├── food-order.controller.ts
-│   ├── laundry.controller.ts
-│   ├── cash.controller.ts
-│   └── dashboard.controller.ts
-├── routes/                  # Rutas Express (/api/v1/...)
-│   ├── auth.routes.ts
-│   ├── guest.routes.ts
-│   ├── billing.routes.ts
-│   ├── food-order.routes.ts
-│   ├── laundry.routes.ts
-│   ├── cash.routes.ts
-│   ├── dashboard.routes.ts
-│   └── index.ts
-├── middlewares/             # Seguridad, JWT, CORS y Manejo de Errores
-│   ├── auth.middleware.ts
-│   ├── role.middleware.ts
-│   ├── error.middleware.ts
-│   └── logger.middleware.ts
-├── utils/                   # Herramientas criptográficas y logger
-│   ├── hasher.ts (Bcrypt)
-│   ├── jwt.ts (JSON Web Tokens)
-│   └── logger.ts
-├── app.ts                   # Aplicación Express
-└── server.ts                # Arranque del servidor HTTP
-```
+Backend RESTful empresarial de alto rendimiento para el sistema de gestion hotelera Nicabliss, construido con Node.js, Express, TypeScript en modo estricto, seguridad JWT, hashing con Bcrypt, persistencia en memoria y una arquitectura en capas limpia, modular y desacoplada.
 
 ---
 
-## 🧪 Suite de Pruebas Automatizadas (Senior QA Suite)
+## Tabla de Contenidos
 
-El proyecto cuenta con **33 pruebas automatizadas** que validan exhaustivamente cada componente, servicio, modelo y endpoint antes del despliegue:
+1. [Vision General del Sistema](#vision-general-del-sistema)
+2. [Stack Tecnologico y Dependencias](#stack-tecnologico-y-dependencias)
+3. [Estructura del Proyecto y Arquitectura](#estructura-del-proyecto-y-arquitectura)
+4. [Instalacion y Puesta en Marcha](#instalacion-y-puesta-en-marcha)
+5. [Variables de Entorno](#variables-de-entorno)
+6. [Credenciales y Datos de Prueba](#credenciales-y-datos-de-prueba)
+7. [Documentacion Tecnica de la API (Endpoints)](#documentacion-tecnica-de-la-api-endpoints)
+   - [Salud del Sistema](#1-salud-del-sistema)
+   - [Autenticacion y Usuarios](#2-autenticacion-y-usuarios-apiv1auth)
+   - [Dashboard y Metricas](#3-dashboard-y-metricas-apiv1dashboard)
+   - [Huespedes y Estancias](#4-huespedes-y-estancias-apiv1guests)
+   - [Cuentas y Cobros](#5-cuentas-y-cobros-apiv1billing)
+   - [Pedidos de Alimentos](#6-pedidos-de-alimentos-apiv1food-orders)
+   - [Lavanderia](#7-lavanderia-apiv1laundry)
+   - [Caja y Cierres](#8-caja-y-cierres-apiv1cash-register)
+8. [Suite de Pruebas Automatizadas (QA)](#suite-de-pruebas-automatizadas-qa)
+9. [Seguridad y Politicas](#seguridad-y-politicas)
+10. [Guia de Migracion a Base de Datos Relacional](#guia-de-migracion-a-base-de-datos-relacional)
 
-- **Unit Tests:**
-  - `auth.service.test.ts`: Login con Bcrypt, token JWT, validación de contraseñas incorrectas y control de usuarios duplicados.
-  - `guest.service.test.ts`: Listado, búsqueda, creación y validación de reglas de negocio (fecha de salida no puede ser anterior a la de entrada).
-  - `billing.service.test.ts`: Cálculo de totales, abonos parciales, liquidación total y rechazo de pagos mayores al saldo.
-  - `food-order.service.test.ts`: Generación de códigos de orden (#PED-xxx) y flujo de preparación.
-  - `laundry.service.test.ts`: Cálculo automático de $0.50 por prenda, conteo de prendas y validación de listas vacías.
-  - `cash.service.test.ts`: Apertura de turno, prevención de turnos dobles, control de efectivo disponible, arqueo y cálculo de diferencia.
-  - `dashboard.service.test.ts`: Agregación de KPIs operativos en tiempo real.
-- **Integration Tests (E2E):**
-  - `api.test.ts`: Health check (`GET /health`), autenticación JWT, protección de rutas (`401 Unauthorized`), respuestas 200 con Bearer Token y manejo semántico de errores (`404 Not Found`).
+---
 
-### Correr Pruebas:
+## Vision General del Sistema
+
+Nicabliss API centraliza y automatiza todas las operaciones diarias de un hotel moderno:
+- Recepcion: Registro de huespedes, check-in, check-out y validacion de consistencia de fechas.
+- Cuentas y Facturacion: Cargos por habitacion, abonos parciales, liquidacion total y calculo dinamico de saldos.
+- Cocina y Room Service: Comandas de alimentos, calculo de importes y ciclo de preparacion.
+- Lavanderia: Conteo por tipo de prenda, tarifa unitaria automatica ($0.50) y seguimiento de entrega.
+- Caja Chica y Turnos: Apertura de caja con fondo inicial, control de ingresos/egresos, arqueo de efectivo con calculo de diferencia (sobrante/faltante) y cierre de turno.
+- Dashboard en Tiempo Real: Agregacion instantanea de ingresos del dia, pedidos pendientes y ocupacion.
+
+---
+
+## Stack Tecnologico y Dependencias
+
+| Tecnologia / Libreria | Version | Proposito en el Proyecto |
+| :--- | :--- | :--- |
+| Node.js | >= 20.x (Probado en v24.19.0) | Entorno de ejecucion en servidor. |
+| TypeScript | ^5.8.2 | Tipado estatico estricto, interfaces y validacion en tiempo de compilacion. |
+| Express | ^4.21.2 | Framework HTTP rapido y minimalista para el diseno de APIs RESTful. |
+| jsonwebtoken | ^9.0.2 | Generacion y verificacion de tokens Bearer firmados criptograficamente. |
+| bcryptjs | ^3.0.3 | Hashing seguro de contrasenas con factor de coste de 10 salt rounds. |
+| helmet | ^8.0.0 | Configuracion segura de cabeceras HTTP (CSP, noSniff, xssFilter). |
+| cors | ^2.8.5 | Control de acceso HTTP entre origenes (Frontend localhost:5173). |
+| dotenv | ^16.4.7 | Inyeccion y tipado de variables de entorno desde archivos .env. |
+| tsx | ^4.19.3 | Ejecucion directa de TypeScript en desarrollo y runner de pruebas ultrarrapido. |
+
+---
+
+## Estructura del Proyecto y Arquitectura
+
+El proyecto esta disenado bajo una Arquitectura en Capas Limpias (Layered Architecture) para garantizar separacion de responsabilidades y maxima facilidad de lectura:
+
+```text
+nicabliss_api/
+|-- .env                         # Variables de entorno activas (ignorado por git)
+|-- .env.example                 # Plantilla de variables de entorno para despliegue
+|-- .gitignore                   # Reglas de exclusion para git (node_modules, dist, .env)
+|-- package.json                 # Definicion de dependencias, metadatos y scripts
+|-- tsconfig.json                # Configuracion estricta de TypeScript (ES2022 / NodeNext)
+|-- README.md                    # Documentacion tecnica completa
+|-- dist/                        # Codigo JavaScript compilado para produccion
+|-- tests/                       # Suite de pruebas automatizadas (QA)
+|   |-- unit/                    # Pruebas unitarias de servicios y modelos de negocio
+|   |   |-- auth.service.test.ts
+|   |   |-- guest.service.test.ts
+|   |   |-- billing.service.test.ts
+|   |   |-- food-order.service.test.ts
+|   |   |-- laundry.service.test.ts
+|   |   |-- cash.service.test.ts
+|   |   `-- dashboard.service.test.ts
+|   `-- integration/             # Pruebas de integracion de la API HTTP (E2E)
+|       `-- api.test.ts
+`-- src/
+    |-- config/                  # Configuracion del entorno (env.ts)
+    |-- models/                  # Modelos de datos del dominio y tipos de entidades
+    |   |-- user.model.ts        # Usuario, credenciales y roles
+    |   |-- guest.model.ts       # Huesped y estancias
+    |   |-- billing.model.ts     # Cuentas, totales y estados de cobro
+    |   |-- food-order.model.ts  # Ordenes de alimentos
+    |   |-- laundry.model.ts     # Solicitudes de lavanderia y catalogo de prendas
+    |   `-- cash.model.ts        # Turnos de caja y movimientos
+    |-- dtos/                    # Contratos de Datos (Data Transfer Objects)
+    |   |-- auth.dto.ts
+    |   |-- guest.dto.ts
+    |   |-- billing.dto.ts
+    |   |-- food-order.dto.ts
+    |   |-- laundry.dto.ts
+    |   `-- cash.dto.ts
+    |-- repositories/            # Almacenamiento en Memoria Thread-Safe
+    |   |-- user.repository.ts
+    |   |-- guest.repository.ts
+    |   |-- billing.repository.ts
+    |   |-- food-order.repository.ts
+    |   |-- laundry.repository.ts
+    |   `-- cash.repository.ts
+    |-- services/                # Logica de negocio, reglas y validaciones
+    |   |-- auth.service.ts
+    |   |-- guest.service.ts
+    |   |-- billing.service.ts
+    |   |-- food-order.service.ts
+    |   |-- laundry.service.ts
+    |   |-- cash.service.ts
+    |   `-- dashboard.service.ts
+    |-- controllers/             # Manejadores de peticion (Request) y respuesta (Response)
+    |   |-- auth.controller.ts
+    |   |-- guest.controller.ts
+    |   |-- billing.controller.ts
+    |   |-- food-order.controller.ts
+    |   |-- laundry.controller.ts
+    |   |-- cash.controller.ts
+    |   `-- dashboard.controller.ts
+    |-- routes/                  # Definicion de rutas y endpoints Express
+    |   |-- auth.routes.ts
+    |   |-- guest.routes.ts
+    |   |-- billing.routes.ts
+    |   |-- food-order.routes.ts
+    |   |-- laundry.routes.ts
+    |   |-- cash.routes.ts
+    |   |-- dashboard.routes.ts
+    |   `-- index.ts             # Enrutador centralizado montado en /api/v1
+    |-- middlewares/             # Filtros de seguridad y manejo global
+    |   |-- auth.middleware.ts   # Validacion de Bearer Token JWT
+    |   |-- role.middleware.ts   # Autorizacion RBAC (ADMIN, RECEPTIONIST)
+    |   |-- error.middleware.ts  # Capturador central de excepciones con codigos HTTP
+    |   `-- logger.middleware.ts # Registro en consola de tiempo y status de peticiones
+    |-- utils/                   # Utilidades transversales
+    |   |-- hasher.ts            # Hashing con Bcrypt (hash y hashSync)
+    |   |-- jwt.ts               # Firma y verificacion de tokens
+    |   `-- logger.ts            # Formateador de consola con timestamp
+    |-- app.ts                   # Ensamblador de la aplicacion Express
+    `-- server.ts                # Inicializacion en puerto 4000 y Graceful Shutdown
+```
+
+---
+
+## Instalacion y Puesta en Marcha
+
+### Prerrequisitos
+- Node.js version 20 o superior.
+- npm version 9 o superior.
+
+### 1. Acceder al directorio
 ```bash
-npm test
+cd C:\Users\joshu\Downloads\nicabliss_api
 ```
 
----
-
-## ⚡ Comandos para Ejecutar
-
+### 2. Instalar dependencias
 ```bash
-# 1. Instalar dependencias
 npm install
+```
 
-# 2. Correr las 33 pruebas unitarias y de integración
-npm test
+### 3. Configurar variables de entorno
+El proyecto incluye un archivo .env preconfigurado. Si deseas crear uno nuevo:
+```bash
+cp .env.example .env
+```
 
-# 3. Iniciar en modo desarrollo con recarga en caliente
+### 4. Ejecutar en Modo Desarrollo (Hot Reload)
+Inicia la API con recarga en caliente utilizando tsx:
+```bash
 npm run dev
+```
 
-# 4. Compilar para producción
+### 5. Compilar y Ejecutar en Modo Produccion
+Compila el codigo TypeScript a JavaScript optimizado en dist/:
+```bash
 npm run build
 npm start
 ```
 
 ---
 
-## 🔐 Credenciales Iniciales
+## Variables de Entorno
 
-- **Usuario:** `admin`
-- **Contraseña:** `12345`
-- **Rol:** `ADMIN`
+Archivo .env:
+
+| Variable | Tipo | Valor Predeterminado | Descripcion |
+| :--- | :--- | :--- | :--- |
+| PORT | Numero | 4000 | Puerto TCP en el que escuchara el servidor Express. |
+| NODE_ENV | String | development | Entorno de ejecucion (development / production). |
+| JWT_SECRET | String | Clave secreta | Clave simetrica utilizada para firmar los tokens JWT. |
+| JWT_EXPIRES_IN | String | 8h | Tiempo de vida de los tokens de sesion. |
+| CORS_ORIGIN | String | http://localhost:5173 | Origenes permitidos separados por comas para el Frontend. |
+
+---
+
+## Credenciales y Datos de Prueba
+
+La API se inicializa en memoria con un usuario administrador precargado con contrasena hasheada:
+
+- Usuario: admin
+- Contrasena: 12345
+- Rol: ADMIN
+
+---
+
+## Documentacion Tecnica de la API (Endpoints)
+
+Todas las rutas (excepto /health y /api/v1/auth/login) requieren la cabecera HTTP:
+```http
+Authorization: Bearer <TU_TOKEN_JWT>
+```
+
+### Formato Estandar de Respuesta
+Todas las respuestas de la API siguen un formato predecible:
+
+Exito:
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+Error:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Descripcion clara del error"
+  },
+  "timestamp": "2026-10-20T14:00:00.000Z"
+}
+```
+
+---
+
+### 1. Salud del Sistema
+
+#### GET /health
+Verifica que el servicio este activo.
+- Acceso: Publico
+- Respuesta (200 OK):
+```json
+{
+  "status": "ok",
+  "system": "Nicabliss Hotel Management API",
+  "environment": "development",
+  "timestamp": "2026-10-20T14:15:00.000Z"
+}
+```
+
+---
+
+### 2. Autenticacion y Usuarios (/api/v1/auth)
+
+#### POST /api/v1/auth/login
+Inicia sesion y obtiene un token JWT firmado.
+- Acceso: Publico
+- Body:
+```json
+{
+  "usuario": "admin",
+  "password": "12345"
+}
+```
+- Respuesta (200 OK):
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": "usr_admin_001",
+      "username": "admin",
+      "email": "admin@nicabliss.com",
+      "fullName": "Administrador Nicabliss",
+      "role": "ADMIN",
+      "createdAt": "2026-10-20T08:00:00.000Z"
+    }
+  }
+}
+```
+
+#### POST /api/v1/auth/register
+Registra un nuevo usuario en el sistema.
+- Acceso: Protegido (Requiere rol ADMIN)
+- Body:
+```json
+{
+  "username": "recepcion1",
+  "email": "recepcion@nicabliss.com",
+  "password": "Password123",
+  "fullName": "Juan Recepcion",
+  "role": "RECEPTIONIST"
+}
+```
+- Respuesta (201 Created): Retorna el objeto del usuario creado sin la contrasena.
+
+#### GET /api/v1/auth/me
+Retorna los datos del usuario autenticado actual.
+- Acceso: Protegido
+
+---
+
+### 3. Dashboard y Metricas (/api/v1/dashboard)
+
+#### GET /api/v1/dashboard/metrics
+Retorna las estadisticas agregadas del hotel en tiempo real.
+- Acceso: Protegido
+- Respuesta (200 OK):
+```json
+{
+  "success": true,
+  "data": {
+    "stats": [
+      { "label": "Ingresos del dia", "value": "$ 43.00", "detail": "Pagos registrados", "code": "revenue", "className": "stat-green" },
+      { "label": "Cuentas abiertas", "value": "2", "detail": "Huespedes con saldo activo", "code": "accounts", "className": "stat-blue" },
+      { "label": "Pedidos pendientes", "value": "2", "detail": "Solicitudes por atender", "code": "orders", "className": "stat-orange" },
+      { "label": "Lavanderia pendiente", "value": "1", "detail": "Solicitudes en proceso", "code": "laundry", "className": "stat-purple" }
+    ],
+    "activeStays": 2,
+    "cashRegisterActive": true,
+    "recentTransactions": [ ... ]
+  }
+}
+```
+
+---
+
+### 4. Huespedes y Estancias (/api/v1/guests)
+
+#### GET /api/v1/guests
+Lista los huespedes registrados. Soporta busqueda con ?search=.
+- Query Params: ?search=carlos (opcional)
+- Acceso: Protegido
+
+#### GET /api/v1/guests/:id
+Obtiene los detalles de un huesped especifico.
+
+#### POST /api/v1/guests
+Registra un nuevo huesped.
+- Body:
+```json
+{
+  "nombre": "Elena Rivas",
+  "documento": "001-120499-0004D",
+  "habitacion": "Habitacion 05",
+  "entrada": "2026-10-21",
+  "salida": "2026-10-24",
+  "estado": "Activo"
+}
+```
+- Regla de Negocio: Falla con 400 VALIDATION_ERROR si la fecha de salida es anterior a entrada.
+
+#### PATCH /api/v1/guests/:id/status
+Actualiza el estado de una estancia (Activo | Finalizado | Reservado).
+
+---
+
+### 5. Cuentas y Cobros (/api/v1/billing)
+
+#### GET /api/v1/billing
+Obtiene todas las cuentas, el total facturado, cobrado y saldo global pendiente.
+- Respuesta (200 OK):
+```json
+{
+  "success": true,
+  "cuentas": [ ... ],
+  "resumen": {
+    "totalFacturado": 60.5,
+    "totalCobrado": 43.0,
+    "saldoPendiente": 17.5
+  }
+}
+```
+
+#### POST /api/v1/billing
+Crea una nueva cuenta o cargo para una habitacion.
+- Body:
+```json
+{
+  "huesped": "Elena Rivas",
+  "habitacion": "Habitacion 05",
+  "concepto": "Hospedaje 3 noches",
+  "total": 120.0
+}
+```
+
+#### POST /api/v1/billing/:id/payments
+Registra un abono a una cuenta existente.
+- Body:
+```json
+{
+  "monto": 50.0
+}
+```
+- Regla de Negocio: Si el monto abonado completa la deuda, el estado cambia automaticamente a Pagado. Si es parcial, a Parcial. Rechaza con error 400 si el monto supera el saldo pendiente.
+
+---
+
+### 6. Pedidos de Alimentos (/api/v1/food-orders)
+
+#### GET /api/v1/food-orders
+Lista los pedidos de restaurante/cocina.
+
+#### POST /api/v1/food-orders
+Crea una nueva comanda de alimentos.
+- Body:
+```json
+{
+  "huesped": "Maria Gonzalez",
+  "habitacion": "Habitacion 01",
+  "productos": "2 desayunos tipicos + 1 jugo de naranja",
+  "total": 14.0
+}
+```
+- Nota: Genera automaticamente un codigo de comanda correlativo unico (ej: #PED-582) con estado inicial Pendiente.
+
+#### PATCH /api/v1/food-orders/:id/status
+Actualiza el estado de la comanda (Pendiente | En preparacion | En camino | Entregado | Cancelado).
+
+---
+
+### 7. Lavanderia (/api/v1/laundry)
+
+#### GET /api/v1/laundry
+Lista las solicitudes de lavanderia.
+
+#### POST /api/v1/laundry
+Crea una nueva solicitud con desglose de prendas.
+- Body:
+```json
+{
+  "huesped": "Carlos Mendoza",
+  "habitacion": "Habitacion 04",
+  "prendas": [
+    { "tipo": "Camisa", "cantidad": 3 },
+    { "tipo": "Pantalon", "cantidad": 2 },
+    { "tipo": "Toalla", "cantidad": 1 }
+  ],
+  "observaciones": "Planchar con almidon suave"
+}
+```
+- Regla de Negocio: La API calcula automaticamente el total de prendas (6 prendas) y el importe exacto basado en la tarifa de $0.50 por prenda ($3.00 en total).
+
+#### PATCH /api/v1/laundry/:id/status
+Actualiza el estado (Pendiente | En proceso | Listo | Entregado | Cancelado).
+
+---
+
+### 8. Caja y Cierres (/api/v1/cash-register)
+
+#### GET /api/v1/cash-register/current
+Consulta los datos de la sesion de caja activa actual. Retorna data: null si la caja esta cerrada.
+
+#### POST /api/v1/cash-register/open
+Abre un nuevo turno de caja con fondo inicial.
+- Body:
+```json
+{
+  "responsable": "Juan Recepcionista",
+  "fondoInicial": 100.0
+}
+```
+- Regla de Negocio: Impide abrir un nuevo turno si ya existe una sesion abierta (409 CONFLICT).
+
+#### POST /api/v1/cash-register/movements
+Registra un movimiento (ingreso o gasto operativo).
+- Body:
+```json
+{
+  "tipo": "Salida",
+  "concepto": "Gasto operativo",
+  "descripcion": "Compra de cafe y azucar para recepcion",
+  "metodo": "Efectivo",
+  "monto": 12.0
+}
+```
+- Regla de Negocio: Impide que una salida en efectivo supere el monto disponible en caja (400 VALIDATION_ERROR).
+
+#### POST /api/v1/cash-register/close
+Realiza el arqueo y cierre del turno.
+- Body:
+```json
+{
+  "efectivoContado": 128.0,
+  "observaciones": "Turno cerrado sin incidencias"
+}
+```
+- Regla de Negocio: Calcula automaticamente la diferencia (efectivoContado - efectivoEsperado), archiva la sesion en el historial y libera la caja para el siguiente turno.
+
+#### GET /api/v1/cash-register/history
+Lista el historial de todos los cierres de caja realizados.
+
+---
+
+## Suite de Pruebas Automatizadas (QA)
+
+El proyecto incluye 33 pruebas automatizadas que garantizan que ningun cambio rompa la logica del negocio:
+
+Para correr las pruebas:
+```bash
+npm test
+```
+
+### Resumen de Pruebas:
+- auth.service.test.ts (5 pruebas): Login exitoso, rechazo por contrasena erronea, rechazo por usuario inexistente, hasheo de contrasenas y deteccion de duplicados.
+- guest.service.test.ts (5 pruebas): Listado, filtrado, creacion, validacion de fechas de salida no anteriores a entrada y actualizacion de estancia.
+- billing.service.test.ts (5 pruebas): Totales iniciales, creacion de cuenta, abono parcial, liquidacion total y rechazo de sobrepagos.
+- food-order.service.test.ts (3 pruebas): Creacion con correlativo, ciclo de estados de comanda.
+- laundry.service.test.ts (3 pruebas): Tarificacion automatica ($0.50/prenda), cambio de estado y rechazo de solicitudes sin prendas.
+- cash.service.test.ts (5 pruebas): Apertura, bloqueo de turnos dobles, movimientos, limite de egresos en efectivo, arqueo y diferencia de caja.
+- dashboard.service.test.ts (1 prueba): Agregacion simultanea de metricas multi-repositorio.
+- api.test.ts (6 pruebas E2E): Health check, login HTTP, rechazo de rutas sin token, acceso con Bearer token y respuestas semanticas 404.
+
+---
+
+## Seguridad y Politicas
+
+1. Proteccion de Contrasenas: Se utiliza Bcrypt con 10 rondas de salting. Ninguna contrasena se guarda en texto plano ni se expone en las respuestas JSON.
+2. Autenticacion sin Estado (Stateless): Los tokens JWT contienen firma HMAC-SHA256 y expiran en 8 horas por defecto.
+3. Cabeceras HTTP Defensivas: Helmet elimina cabeceras como X-Powered-By y aplica politicas restrictivas contra ataques XSS y Clickjacking.
+4. Control CORS Estricto: Solo las URLs definidas en CORS_ORIGIN tienen permitido comunicarse con la API desde el navegador.
+
+---
+
+## Guia de Migracion a Base de Datos Relacional
+
+Actualmente la API almacena sus datos en repositorios en memoria dentro de src/repositories/. Gracias al patron Repository y a la arquitectura en capas:
+
+1. Para migrar a PostgreSQL / MySQL / MongoDB:
+   - Instala tu ORM preferido (ejemplo: npm install prisma @prisma/client o typeorm).
+   - Modifica unicamente las clases dentro de src/repositories/ para que realicen las consultas SQL correspondientes.
+   - Los controladores, los servicios, los DTOs y las rutas NO requieren ninguna modificacion.
