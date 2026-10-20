@@ -7,6 +7,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+.vercel/
 
 # Variables de entorno y secretos (nunca commitear secretos)
 .env

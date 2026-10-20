@@ -18,3 +18,11 @@ export const config = {
     authToken: isTest ? "" : (process.env.TURSO_AUTH_TOKEN || ""),
   },
 };
+
+if (process.env.VERCEL && !process.env.TURSO_DATABASE_URL) {
+  console.warn(
+    "[NICABLISS VERCEL WARNING] TURSO_DATABASE_URL no está configurada en las variables de entorno de Vercel. " +
+    "Asegúrese de definir TURSO_DATABASE_URL y TURSO_AUTH_TOKEN en el Dashboard de Vercel."
+  );
+}
+
