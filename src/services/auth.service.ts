@@ -2,6 +2,7 @@ import { UserRepository } from "../repositories/user.repository.js";
 import { LoginDto, RegisterUserDto, LoginResponseDto, UserResponseDto } from "../dtos/auth.dto.js";
 import { PasswordHasher } from "../utils/hasher.js";
 import { JwtProvider } from "../utils/jwt.js";
+import { randomUUID } from "crypto";
 
 export class AuthService {
   constructor(private userRepo: UserRepository) {}
@@ -59,7 +60,7 @@ export class AuthService {
 
     const passwordHash = await PasswordHasher.hash(dto.password);
     const newUser = {
-      id: "usr_" + Math.random().toString(36).substring(2, 9),
+      id: `usr_${randomUUID()}`,
       username: dto.username.trim(),
       email: dto.email.trim(),
       passwordHash,

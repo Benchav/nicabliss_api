@@ -1,5 +1,5 @@
 import express, { Application, Request, Response } from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import helmet from "helmet";
 import { config } from "./config/env.js";
 import { requestLogger } from "./middlewares/logger.middleware.js";
@@ -8,6 +8,21 @@ import { apiRouter } from "./routes/index.js";
 
 export function createApp(): Application {
   const app = express();
+  const corsOptions: CorsOptions = {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        config.cors.origin.includes(origin) ||
+        config.cors.origin.includes("*")
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+  };
 
   // Normalización de rutas para despliegues Serverless (Vercel) y proxies reversos
   app.use((req: Request, _res: Response, next) => {
@@ -25,25 +40,10 @@ export function createApp(): Application {
 
   // Seguridad HTTP y CORS
   app.use(helmet());
-  app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (
-        config.cors.origin.includes(origin) ||
-        config.cors.origin.includes("*") ||
-        origin.endsWith(".vercel.app")
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, true);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }));
+  app.use(cors(corsOptions));
 
   // Manejo explícito de preflight OPTIONS
-  app.options("*", cors());
+  app.options("*", cors(corsOptions));
 
   // Body parsers y log de peticiones
   app.use(express.json({ limit: "2mb" }));

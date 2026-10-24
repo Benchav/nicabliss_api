@@ -21,7 +21,7 @@ export class FoodOrderController {
 
   public create = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.orderService.create(req.body);
+      const data = await this.orderService.create(req.body, req.user?.sub);
       res.status(201).json({ success: true, data });
     } catch (err) { next(err); }
   };

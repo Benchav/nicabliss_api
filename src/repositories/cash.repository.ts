@@ -126,7 +126,32 @@ export class CashRepository {
   }
 
   public async reset(): Promise<void> {
-    await dbClient.execute(`DELETE FROM cash_movements WHERE session_id IN (SELECT id FROM cash_sessions WHERE is_closed = 0);`);
-    await dbClient.execute(`DELETE FROM cash_sessions WHERE is_closed = 0;`);
+    const now = new Date().toISOString();
+    await dbClient.batch([
+      {
+        sql: `DELETE FROM cash_movements
+              WHERE session_id IN (SELECT id FROM cash_sessions WHERE is_closed = 0)
+                AND payment_id IS NULL;`,
+        args: [],
+      },
+      {
+        sql: `DELETE FROM cash_sessions
+              WHERE is_closed = 0
+                AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.cash_session_id = cash_sessions.id);`,
+        args: [],
+      },
+      {
+        sql: `UPDATE cash_sessions
+              SET is_closed = 1,
+                  cierre = COALESCE(cierre, ?),
+                  efectivo_contado = COALESCE(efectivo_contado, efectivo_esperado),
+                  diferencia = COALESCE(diferencia, 0),
+                  observaciones = CASE
+                    WHEN observaciones = '' THEN 'Cierre automático de aislamiento de pruebas'
+                    ELSE observaciones END
+              WHERE is_closed = 0;`,
+        args: [now],
+      },
+    ], "write");
   }
 }

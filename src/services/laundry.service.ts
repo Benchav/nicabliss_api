@@ -1,11 +1,15 @@
 import { LaundryRepository } from "../repositories/laundry.repository.js";
 import { CreateLaundryOrderDto, UpdateLaundryOrderDto, UpdateLaundryStatusDto } from "../dtos/laundry.dto.js";
 import { LaundryModel } from "../models/laundry.model.js";
+import { StayRepository } from "../repositories/stay.repository.js";
 
 export class LaundryService {
   private static readonly PRECIO_POR_PRENDA = 0.5;
 
-  constructor(private laundryRepo: LaundryRepository) {}
+  constructor(
+    private laundryRepo: LaundryRepository,
+    private stayRepo: StayRepository = new StayRepository()
+  ) {}
 
   public async getAll(search?: string): Promise<LaundryModel[]> {
     return this.laundryRepo.findAll(search);
@@ -17,8 +21,12 @@ export class LaundryService {
     return order;
   }
 
-  public async create(dto: CreateLaundryOrderDto): Promise<LaundryModel> {
-    if (!dto.huesped?.trim() || !dto.habitacion?.trim()) {
+  public async create(dto: CreateLaundryOrderDto, userId?: string): Promise<LaundryModel> {
+    const stay = dto.stayId ? await this.stayRepo.findById(Number(dto.stayId)) : null;
+    if (dto.stayId && (!stay || stay.estado !== "Activa")) {
+      throw { statusCode: 409, code: "STAY_NOT_ACTIVE", message: "Debe seleccionar una estancia activa" };
+    }
+    if (!stay && (!dto.huesped?.trim() || !dto.habitacion?.trim())) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Huésped y habitación son obligatorios" };
     }
     if (!dto.prendas || dto.prendas.length === 0) {
@@ -30,17 +38,21 @@ export class LaundryService {
 
     const newOrder: LaundryModel = {
       id: Date.now(),
-      huesped: dto.huesped.trim(),
-      habitacion: dto.habitacion.trim(),
+      huesped: stay?.customerName || dto.huesped!.trim(),
+      habitacion: stay?.habitacion || dto.habitacion!.trim(),
       prendas: dto.prendas,
       totalPrendas,
       total,
       estado: "Pendiente",
-      fecha: new Date().toLocaleDateString("es-NI"),
+      fecha: new Date().toISOString(),
       observaciones: dto.observaciones?.trim() || "Sin observaciones especiales",
+      customerId: stay?.customerId,
+      stayId: stay?.id,
+      createdBy: stay ? userId : undefined,
     };
 
-    await this.laundryRepo.save(newOrder);
+    if (stay && !userId) throw { statusCode: 401, code: "UNAUTHORIZED", message: "Usuario no autenticado" };
+    await this.laundryRepo.saveWithConsumption(newOrder);
     return newOrder;
   }
 

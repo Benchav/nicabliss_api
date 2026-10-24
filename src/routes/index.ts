@@ -7,11 +7,21 @@ import { laundryRouter } from "./laundry.routes.js";
 import { cashRouter } from "./cash.routes.js";
 import { dashboardRouter } from "./dashboard.routes.js";
 import { userRouter } from "./user.routes.js";
+import { customerRouter } from "./customer.routes.js";
+import { paymentRouter, reservationRouter, roomRouter } from "./reservation.routes.js";
+import { serviceCatalogRouter, serviceConsumptionRouter, stayRouter } from "./stay.routes.js";
 
 export const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
 apiRouter.use("/users", userRouter);
+apiRouter.use("/customers", customerRouter);
+apiRouter.use("/reservations", reservationRouter);
+apiRouter.use("/rooms", roomRouter);
+apiRouter.use("/payments", paymentRouter);
+apiRouter.use("/stays", stayRouter);
+apiRouter.use("/service-catalog", serviceCatalogRouter);
+apiRouter.use("/service-consumptions", serviceConsumptionRouter);
 apiRouter.use("/guests", guestRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/food-orders", foodOrderRouter);

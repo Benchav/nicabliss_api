@@ -9,4 +9,8 @@ export interface FoodOrderModel {
   total: number;
   estado: EstadoPedido;
   fecha: string;
+  customerId?: number;
+  stayId?: number;
+  serviceConsumptionId?: number;
+  createdBy?: string;
 }

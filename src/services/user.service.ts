@@ -2,6 +2,7 @@ import { UserRepository } from "../repositories/user.repository.js";
 import { CreateUserDto, UpdateUserDto, UserResponseDto } from "../dtos/user.dto.js";
 import { UserModel, UserRole } from "../models/user.model.js";
 import { PasswordHasher } from "../utils/hasher.js";
+import { randomUUID } from "crypto";
 
 const VALID_ROLES: UserRole[] = ["ADMIN", "RECEPTIONIST", "STAFF"];
 
@@ -70,7 +71,7 @@ export class UserService {
 
     const passwordHash = await PasswordHasher.hash(dto.password);
     const newUser: UserModel = {
-      id: "usr_" + Math.random().toString(36).substring(2, 9),
+      id: `usr_${randomUUID()}`,
       username: dto.username.trim(),
       email: dto.email.trim().toLowerCase(),
       passwordHash,

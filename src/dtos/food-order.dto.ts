@@ -1,8 +1,9 @@
 import { EstadoPedido } from "../models/food-order.model.js";
 
 export interface CreateFoodOrderDto {
-  huesped: string;
-  habitacion: string;
+  stayId?: number;
+  huesped?: string;
+  habitacion?: string;
   productos: string;
   total: number;
 }
