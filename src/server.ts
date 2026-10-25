@@ -1,4 +1,4 @@
-import { createApp } from "./app.js";
+import app from "./app.js";
 import { config } from "./config/env.js";
 import { Logger } from "./utils/logger.js";
 import { runMigrations } from "./db/migrate.js";
@@ -7,8 +7,6 @@ async function bootstrap(): Promise<void> {
   if (config.database.autoMigrate) {
     await runMigrations();
   }
-
-  const app = createApp();
 
   const server = app.listen(config.port, () => {
     Logger.info(`Nicabliss API lista en el puerto ${config.port} [${config.nodeEnv}]`, "SERVER");

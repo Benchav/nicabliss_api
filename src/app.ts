@@ -28,20 +28,6 @@ export function createApp(): Application {
     allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
   };
 
-  // Normalización de rutas para despliegues Serverless (Vercel) y proxies reversos
-  app.use((req: Request, _res: Response, next) => {
-    const originalPath =
-      (req.headers["x-matched-path"] as string) ||
-      (req.headers["x-vercel-original-url"] as string);
-
-    if (originalPath && !originalPath.includes("api/index")) {
-      req.url = originalPath;
-    } else if (req.url.startsWith("/api/index")) {
-      req.url = req.url.replace(/^\/api\/index/, "") || "/";
-    }
-    next();
-  });
-
   // Seguridad HTTP y CORS
   app.use(helmet());
   app.use(cors(corsOptions));
@@ -127,3 +113,7 @@ export function createApp(): Application {
 
   return app;
 }
+
+const app = createApp();
+
+export default app;
