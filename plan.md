@@ -49,7 +49,8 @@ Problemas que deben resolverse:
 Cliente
    ↓
 Reserva
-   ↓
+   ↓ 
+   
 Estancia
    ↓
 Consumos de servicios
