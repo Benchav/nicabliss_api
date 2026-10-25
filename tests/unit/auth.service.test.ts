@@ -87,7 +87,7 @@ describe("AuthService Unit Tests", () => {
         await authService.register({
           username: "admin",
           email: "admin2@nicabliss.com",
-          password: "password",
+          password: "password123!",
           fullName: "Admin Duplicado",
         });
       },

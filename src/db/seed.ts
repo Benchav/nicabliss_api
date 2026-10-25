@@ -1,8 +1,15 @@
 import { dbClient } from "./client.js";
 import { PasswordHasher } from "../utils/hasher.js";
 import { Logger } from "../utils/logger.js";
+import { config } from "../config/env.js";
 
 export async function runSeeds(): Promise<void> {
+  if (!config.database.allowDemoSeed) {
+    throw new Error(
+      "Seed de demostración bloqueado. Use ALLOW_DEMO_SEED=true solo de forma explícita fuera de producción."
+    );
+  }
+
   Logger.info("Verificando y ejecutando seeds en Turso...", "SEED");
 
   // 1. Seed Usuario Admin

@@ -2,14 +2,10 @@ import { createApp } from "./app.js";
 import { config } from "./config/env.js";
 import { Logger } from "./utils/logger.js";
 import { runMigrations } from "./db/migrate.js";
-import { runSeeds } from "./db/seed.js";
 
 async function bootstrap(): Promise<void> {
-  try {
+  if (config.database.autoMigrate) {
     await runMigrations();
-    await runSeeds();
-  } catch (err) {
-    Logger.error("Advertencia durante inicialización de Turso:", err);
   }
 
   const app = createApp();
@@ -32,4 +28,7 @@ async function bootstrap(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-bootstrap();
+bootstrap().catch((error: unknown) => {
+  Logger.error("No se pudo iniciar Nicabliss API:", error);
+  process.exit(1);
+});

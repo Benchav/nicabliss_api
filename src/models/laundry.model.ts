@@ -15,4 +15,8 @@ export interface LaundryModel {
   estado: EstadoLavanderia;
   fecha: string;
   observaciones: string;
+  customerId?: number;
+  stayId?: number;
+  serviceConsumptionId?: number;
+  createdBy?: string;
 }

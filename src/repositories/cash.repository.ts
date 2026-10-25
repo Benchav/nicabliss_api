@@ -1,5 +1,6 @@
 import { CashSessionModel, CashMovementModel, MetodoPago, TipoMovimiento, ConceptoMovimiento } from "../models/cash.model.js";
 import { dbClient } from "../db/client.js";
+import { assertTestDatabase } from "../db/test-database-guard.js";
 
 function mapRowToMovement(row: any): CashMovementModel {
   return {
@@ -10,6 +11,12 @@ function mapRowToMovement(row: any): CashMovementModel {
     descripcion: String(row.descripcion || ""),
     metodo: row.metodo as MetodoPago,
     monto: Number(row.monto),
+    paymentId: row.payment_id ? Number(row.payment_id) : undefined,
+    customerId: row.customer_id ? Number(row.customer_id) : undefined,
+    reservationId: row.reservation_id ? Number(row.reservation_id) : undefined,
+    invoiceId: row.invoice_id ? Number(row.invoice_id) : undefined,
+    createdBy: row.created_by ? String(row.created_by) : undefined,
+    source: row.source ? String(row.source) as CashMovementModel["source"] : undefined,
   };
 }
 
@@ -89,16 +96,28 @@ export class CashRepository {
 
     for (const m of session.movimientos) {
       statements.push({
-        sql: `INSERT INTO cash_movements (id, session_id, fecha, tipo, concepto, descripcion, metodo, monto)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO cash_movements (
+                id, session_id, fecha, tipo, concepto, descripcion, metodo, monto,
+                payment_id, customer_id, reservation_id, invoice_id, created_by, source
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 fecha = excluded.fecha,
                 tipo = excluded.tipo,
                 concepto = excluded.concepto,
                 descripcion = excluded.descripcion,
                 metodo = excluded.metodo,
-                monto = excluded.monto;`,
-        args: [m.id, session.id, m.fecha, m.tipo, m.concepto, m.descripcion, m.metodo, m.monto],
+                monto = excluded.monto,
+                payment_id = COALESCE(cash_movements.payment_id, excluded.payment_id),
+                customer_id = COALESCE(cash_movements.customer_id, excluded.customer_id),
+                reservation_id = COALESCE(cash_movements.reservation_id, excluded.reservation_id),
+                invoice_id = COALESCE(cash_movements.invoice_id, excluded.invoice_id),
+                created_by = COALESCE(cash_movements.created_by, excluded.created_by),
+                source = CASE WHEN cash_movements.source = 'MANUAL' THEN excluded.source ELSE cash_movements.source END;`,
+        args: [
+          m.id, session.id, m.fecha, m.tipo, m.concepto, m.descripcion, m.metodo, m.monto,
+          m.paymentId ?? null, m.customerId ?? null, m.reservationId ?? null, m.invoiceId ?? null,
+          m.createdBy ?? null, m.source ?? "MANUAL",
+        ],
       });
     }
 
@@ -107,6 +126,46 @@ export class CashRepository {
 
   public async addHistory(session: CashSessionModel): Promise<void> {
     await this.saveCurrentSession({ ...session, isClosed: true });
+  }
+
+  public async closeWithAudit(
+    session: CashSessionModel,
+    userId?: string,
+    ipAddress?: string
+  ): Promise<void> {
+    const createdAt = new Date().toISOString();
+    await dbClient.batch([
+      {
+        sql: `UPDATE cash_sessions SET
+                cierre = ?, efectivo_contado = ?, diferencia = ?, observaciones = ?, is_closed = 1
+              WHERE id = ? AND is_closed = 0;`,
+        args: [
+          session.cierre ?? null,
+          session.efectivoContado ?? null,
+          session.diferencia ?? null,
+          session.observaciones,
+          session.id,
+        ],
+      },
+      {
+        sql: `INSERT INTO audit_logs (
+                user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
+              ) VALUES (?, 'CLOSE', 'cash_session', ?, ?, ?, ?, ?);`,
+        args: [
+          userId ?? null,
+          String(session.id),
+          JSON.stringify({ isClosed: false }),
+          JSON.stringify({
+            isClosed: true,
+            efectivoEsperado: session.efectivoEsperado,
+            efectivoContado: session.efectivoContado,
+            diferencia: session.diferencia,
+          }),
+          ipAddress ?? null,
+          createdAt,
+        ],
+      },
+    ], "write");
   }
 
   public async getHistory(): Promise<CashSessionModel[]> {
@@ -126,7 +185,33 @@ export class CashRepository {
   }
 
   public async reset(): Promise<void> {
-    await dbClient.execute(`DELETE FROM cash_movements WHERE session_id IN (SELECT id FROM cash_sessions WHERE is_closed = 0);`);
-    await dbClient.execute(`DELETE FROM cash_sessions WHERE is_closed = 0;`);
+    assertTestDatabase("CashRepository.reset");
+    const now = new Date().toISOString();
+    await dbClient.batch([
+      {
+        sql: `DELETE FROM cash_movements
+              WHERE session_id IN (SELECT id FROM cash_sessions WHERE is_closed = 0)
+                AND payment_id IS NULL;`,
+        args: [],
+      },
+      {
+        sql: `DELETE FROM cash_sessions
+              WHERE is_closed = 0
+                AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.cash_session_id = cash_sessions.id);`,
+        args: [],
+      },
+      {
+        sql: `UPDATE cash_sessions
+              SET is_closed = 1,
+                  cierre = COALESCE(cierre, ?),
+                  efectivo_contado = COALESCE(efectivo_contado, efectivo_esperado),
+                  diferencia = COALESCE(diferencia, 0),
+                  observaciones = CASE
+                    WHEN observaciones = '' THEN 'Cierre automático de aislamiento de pruebas'
+                    ELSE observaciones END
+              WHERE is_closed = 0;`,
+        args: [now],
+      },
+    ], "write");
   }
 }

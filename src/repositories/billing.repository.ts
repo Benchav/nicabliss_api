@@ -1,5 +1,6 @@
 import { BillingModel, EstadoCobro } from "../models/billing.model.js";
 import { dbClient } from "../db/client.js";
+import { assertTestDatabase } from "../db/test-database-guard.js";
 
 function mapRowToBilling(row: any): BillingModel {
   return {
@@ -97,6 +98,7 @@ export class BillingRepository {
   }
 
   public async reset(): Promise<void> {
+    assertTestDatabase("BillingRepository.reset");
     await dbClient.execute(`DELETE FROM billing_accounts WHERE id NOT IN (1001, 1002, 1003);`);
     await dbClient.execute(`
       UPDATE billing_accounts 

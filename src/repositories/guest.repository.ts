@@ -1,5 +1,6 @@
 import { GuestModel, EstadoEstancia } from "../models/guest.model.js";
 import { dbClient } from "../db/client.js";
+import { assertTestDatabase } from "../db/test-database-guard.js";
 
 function mapRowToGuest(row: any): GuestModel {
   return {
@@ -75,6 +76,7 @@ export class GuestRepository {
   }
 
   public async reset(): Promise<void> {
+    assertTestDatabase("GuestRepository.reset");
     await dbClient.execute(`DELETE FROM guests WHERE id NOT IN (1, 2, 3, 4);`);
     await dbClient.execute(`
       UPDATE guests 

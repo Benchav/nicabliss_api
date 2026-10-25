@@ -8,4 +8,5 @@ export interface UserModel {
   role: UserRole;
   fullName: string;
   createdAt: string;
+  tokenVersion: number;
 }

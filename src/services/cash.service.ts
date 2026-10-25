@@ -1,9 +1,16 @@
 import { CashRepository } from "../repositories/cash.repository.js";
 import { OpenCashDto, AddMovementDto, CloseCashDto } from "../dtos/cash.dto.js";
 import { CashSessionModel, CashMovementModel } from "../models/cash.model.js";
+import { ReportRepository } from "../repositories/report.repository.js";
+import { ReportService } from "./report.service.js";
+import { config } from "../config/env.js";
+import { formatBusinessDateTime } from "../utils/business-time.js";
 
 export class CashService {
-  constructor(private cashRepo: CashRepository) {}
+  constructor(
+    private cashRepo: CashRepository,
+    private reportService: ReportService = new ReportService(new ReportRepository())
+  ) {}
 
   public async getCurrentSession(): Promise<CashSessionModel | null> {
     return this.cashRepo.getCurrentSession();
@@ -23,7 +30,7 @@ export class CashService {
     const session: CashSessionModel = {
       id: Date.now(),
       responsable: dto.responsable.trim(),
-      apertura: new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" }),
+      apertura: formatBusinessDateTime(new Date(), config.businessTimezone),
       fondoInicial: fondo,
       ingresosEfectivo: 0,
       ingresosDigitales: 0,
@@ -38,7 +45,7 @@ export class CashService {
     return session;
   }
 
-  public async addMovement(dto: AddMovementDto): Promise<CashSessionModel> {
+  public async addMovement(dto: AddMovementDto, userId?: string): Promise<CashSessionModel> {
     const session = await this.cashRepo.getCurrentSession();
     if (!session || session.isClosed) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para registrar movimientos" };
@@ -55,12 +62,14 @@ export class CashService {
 
     const movimiento: CashMovementModel = {
       id: Date.now(),
-      fecha: new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" }),
+      fecha: formatBusinessDateTime(new Date(), config.businessTimezone),
       tipo: dto.tipo,
       concepto: dto.concepto,
       descripcion: dto.descripcion?.trim() || "",
       metodo: dto.metodo,
       monto,
+      createdBy: userId,
+      source: "MANUAL",
     };
 
     session.movimientos.unshift(movimiento);
@@ -84,7 +93,7 @@ export class CashService {
     return session;
   }
 
-  public async closeSession(dto: CloseCashDto): Promise<CashSessionModel> {
+  public async closeSession(dto: CloseCashDto, userId?: string, ipAddress?: string): Promise<CashSessionModel> {
     const session = await this.cashRepo.getCurrentSession();
     if (!session || session.isClosed) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para cerrar" };
@@ -95,14 +104,29 @@ export class CashService {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El efectivo contado debe ser un número válido mayor o igual a 0" };
     }
 
+    const reconciliation = await this.reportService.getCashReconciliation({ sessionId: session.id });
+    if (!reconciliation.balanced) {
+      throw {
+        statusCode: 409,
+        code: "CASH_RECONCILIATION_MISMATCH",
+        message: "La caja no puede cerrarse porque existen descuadres entre pagos y movimientos automáticos",
+        details: {
+          difference: reconciliation.totals.difference,
+          mismatchCount: reconciliation.mismatchCount,
+          missingMovementCount: reconciliation.missingMovementCount,
+          orphanMovementCount: reconciliation.orphanMovementCount,
+          sessionIntegrity: reconciliation.sessionIntegrity,
+        },
+      };
+    }
+
     session.efectivoContado = contado;
     session.diferencia = Number((contado - session.efectivoEsperado).toFixed(2));
     session.observaciones = dto.observaciones?.trim() || "";
-    session.cierre = new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" });
+    session.cierre = formatBusinessDateTime(new Date(), config.businessTimezone);
     session.isClosed = true;
 
-    await this.cashRepo.addHistory(session);
-    await this.cashRepo.saveCurrentSession(null);
+    await this.cashRepo.closeWithAudit(session, userId, ipAddress);
     return session;
   }
 

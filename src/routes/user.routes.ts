@@ -4,6 +4,8 @@ import { UserService } from "../services/user.service.js";
 import { UserRepository } from "../repositories/user.repository.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { requireRole } from "../middlewares/role.middleware.js";
+import { validateBody } from "../middlewares/validate.middleware.js";
+import { createUserSchema, updateUserSchema } from "../validators/user.validator.js";
 
 export const userRepository = new UserRepository();
 export const userService = new UserService(userRepository);
@@ -17,6 +19,6 @@ userRouter.use(requireRole("ADMIN"));
 
 userRouter.get("/", userController.getAll);
 userRouter.get("/:id", userController.getById);
-userRouter.post("/", userController.create);
-userRouter.put("/:id", userController.update);
+userRouter.post("/", validateBody(createUserSchema), userController.create);
+userRouter.put("/:id", validateBody(updateUserSchema), userController.update);
 userRouter.delete("/:id", userController.delete);

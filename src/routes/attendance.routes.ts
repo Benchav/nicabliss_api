@@ -1,0 +1,21 @@
+import { Router } from "express";
+import { AttendanceController } from "../controllers/attendance.controller.js";
+import { authMiddleware } from "../middlewares/auth.middleware.js";
+import { requireRole } from "../middlewares/role.middleware.js";
+import { validateBody } from "../middlewares/validate.middleware.js";
+import { AttendanceRepository } from "../repositories/attendance.repository.js";
+import { AttendanceService } from "../services/attendance.service.js";
+import { absenceSchema, scheduleSchema, updateAttendanceSchema } from "../validators/attendance.validator.js";
+
+const controller = new AttendanceController(new AttendanceService(new AttendanceRepository()));
+export const attendanceRouter = Router();
+attendanceRouter.use(authMiddleware);
+attendanceRouter.post("/check-in", controller.checkIn);
+attendanceRouter.post("/check-out", controller.checkOut);
+attendanceRouter.get("/today", controller.today);
+attendanceRouter.get("/", requireRole("ADMIN", "RECEPTIONIST"), controller.all);
+attendanceRouter.post("/absence", requireRole("ADMIN"), validateBody(absenceSchema), controller.absence);
+attendanceRouter.get("/report", requireRole("ADMIN"), controller.report);
+attendanceRouter.put("/schedules", requireRole("ADMIN"), validateBody(scheduleSchema), controller.saveSchedule);
+attendanceRouter.get("/schedules", requireRole("ADMIN"), controller.schedules);
+attendanceRouter.put("/:id", requireRole("ADMIN"), validateBody(updateAttendanceSchema), controller.update);

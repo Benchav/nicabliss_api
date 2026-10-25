@@ -2,6 +2,7 @@ import { UserRepository } from "../repositories/user.repository.js";
 import { CreateUserDto, UpdateUserDto, UserResponseDto } from "../dtos/user.dto.js";
 import { UserModel, UserRole } from "../models/user.model.js";
 import { PasswordHasher } from "../utils/hasher.js";
+import { randomUUID } from "crypto";
 
 const VALID_ROLES: UserRole[] = ["ADMIN", "RECEPTIONIST", "STAFF"];
 
@@ -41,11 +42,11 @@ export class UserService {
       };
     }
 
-    if (dto.password.trim().length < 4) {
+    if (dto.password.trim().length < 12) {
       throw {
         statusCode: 400,
         code: "VALIDATION_ERROR",
-        message: "La contraseña debe tener al menos 4 caracteres",
+        message: "La contraseña debe tener al menos 12 caracteres",
       };
     }
 
@@ -70,25 +71,33 @@ export class UserService {
 
     const passwordHash = await PasswordHasher.hash(dto.password);
     const newUser: UserModel = {
-      id: "usr_" + Math.random().toString(36).substring(2, 9),
+      id: `usr_${randomUUID()}`,
       username: dto.username.trim(),
       email: dto.email.trim().toLowerCase(),
       passwordHash,
       role,
       fullName: dto.fullName?.trim() || dto.username.trim(),
       createdAt: new Date().toISOString(),
+      tokenVersion: 0,
     };
 
     await this.userRepo.save(newUser);
     return this.mapToResponse(newUser);
   }
 
-  public async update(id: string, dto: UpdateUserDto, _currentUserId?: string): Promise<UserResponseDto> {
+  public async update(
+    id: string,
+    dto: UpdateUserDto,
+    currentUserId?: string,
+    ipAddress?: string
+  ): Promise<UserResponseDto> {
     const user = await this.userRepo.findById(id);
     if (!user) {
       throw { statusCode: 404, code: "NOT_FOUND", message: `Usuario con ID '${id}' no encontrado` };
     }
 
+    const previousRole = user.role;
+    const passwordWillChange = dto.password !== undefined;
     const isRootAdmin = user.id === "usr_admin_001" || user.username.toLowerCase() === "admin";
 
     // Validar protecciones de Root Admin
@@ -116,6 +125,13 @@ export class UserService {
           statusCode: 400,
           code: "VALIDATION_ERROR",
           message: `Rol inválido. Valores permitidos: ${VALID_ROLES.join(", ")}`,
+        };
+      }
+      if (currentUserId === id && dto.role !== user.role) {
+        throw {
+          statusCode: 400,
+          code: "SELF_ROLE_CHANGE",
+          message: "No puedes cambiar el rol de tu propia sesión activa",
         };
       }
       user.role = dto.role;
@@ -149,11 +165,11 @@ export class UserService {
 
     // Validar cambio de contraseña
     if (dto.password) {
-      if (dto.password.trim().length < 4) {
+      if (dto.password.trim().length < 12) {
         throw {
           statusCode: 400,
           code: "VALIDATION_ERROR",
-          message: "La contraseña debe tener al menos 4 caracteres",
+          message: "La contraseña debe tener al menos 12 caracteres",
         };
       }
       user.passwordHash = await PasswordHasher.hash(dto.password);
@@ -164,7 +180,15 @@ export class UserService {
       user.fullName = dto.fullName.trim();
     }
 
-    await this.userRepo.save(user);
+    if (user.role !== previousRole || passwordWillChange) {
+      user.tokenVersion += 1;
+    }
+
+    if (user.role !== previousRole) {
+      await this.userRepo.saveWithRoleAudit(user, previousRole, currentUserId, ipAddress);
+    } else {
+      await this.userRepo.save(user);
+    }
     return this.mapToResponse(user);
   }
 

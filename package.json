@@ -4,14 +4,24 @@
   "description": "Enterprise DDD Backend with Turso (LibSQL) for Nicabliss Hotel PMS",
   "type": "module",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/db/migrate.ts && tsx src/db/seed.ts && tsx --test --test-concurrency=1 tests/**/*.test.ts",
+    "test": "cross-env NODE_ENV=test tsx src/db/prepare-test.ts && cross-env NODE_ENV=test tsx src/db/migrate.ts && cross-env NODE_ENV=test tsx src/db/seed.ts && cross-env NODE_ENV=test tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:backup": "tsx src/db/backup.ts",
+    "db:verify": "tsx src/db/verify.ts",
+    "db:production:check": "tsx src/db/production-check.ts",
+    "db:admin:rotate-password": "tsx src/db/rotate-admin-password.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:legacy:preview": "tsx src/db/legacy-migrate.ts",
+    "db:legacy:execute": "tsx src/db/legacy-migrate.ts --execute",
+    "e2e:server": "cross-env NODE_ENV=test TEST_DATABASE_URL=file:test.db PORT=4100 CORS_ORIGIN=http://127.0.0.1:4173 tsx src/e2e-server.ts"
   },
   "keywords": [
     "hotel-management",
@@ -30,7 +40,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.20.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -38,6 +50,8 @@
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.13.8",
+    "@types/pdfkit": "^0.17.7",
+    "cross-env": "^10.1.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
