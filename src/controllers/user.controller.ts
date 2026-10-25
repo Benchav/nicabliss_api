@@ -34,7 +34,7 @@ export class UserController {
   public update = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const currentUserId = req.user?.sub;
-      const data = await this.userService.update(String(req.params.id), req.body, currentUserId);
+      const data = await this.userService.update(String(req.params.id), req.body, currentUserId, req.ip);
       res.json({ success: true, data });
     } catch (err) {
       next(err);

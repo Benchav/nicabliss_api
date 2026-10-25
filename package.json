@@ -11,7 +11,12 @@
     "lint": "tsc --noEmit",
     "test": "cross-env NODE_ENV=test tsx src/db/prepare-test.ts && cross-env NODE_ENV=test tsx src/db/migrate.ts && cross-env NODE_ENV=test tsx src/db/seed.ts && cross-env NODE_ENV=test tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:backup": "tsx src/db/backup.ts",
+    "db:verify": "tsx src/db/verify.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:legacy:preview": "tsx src/db/legacy-migrate.ts",
+    "db:legacy:execute": "tsx src/db/legacy-migrate.ts --execute",
+    "e2e:server": "cross-env NODE_ENV=test TEST_DATABASE_URL=file:test.db PORT=4100 CORS_ORIGIN=http://127.0.0.1:4173 tsx src/e2e-server.ts"
   },
   "keywords": [
     "hotel-management",

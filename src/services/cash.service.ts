@@ -91,7 +91,7 @@ export class CashService {
     return session;
   }
 
-  public async closeSession(dto: CloseCashDto): Promise<CashSessionModel> {
+  public async closeSession(dto: CloseCashDto, userId?: string, ipAddress?: string): Promise<CashSessionModel> {
     const session = await this.cashRepo.getCurrentSession();
     if (!session || session.isClosed) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para cerrar" };
@@ -124,8 +124,7 @@ export class CashService {
     session.cierre = new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" });
     session.isClosed = true;
 
-    await this.cashRepo.addHistory(session);
-    await this.cashRepo.saveCurrentSession(null);
+    await this.cashRepo.closeWithAudit(session, userId, ipAddress);
     return session;
   }
 

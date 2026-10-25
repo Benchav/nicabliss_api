@@ -26,6 +26,47 @@ export class ReportController {
     } catch (error) { next(error); }
   };
 
+  public dashboard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getDailyDashboard(
+        String(req.query.date ?? ""),
+        req.query.method as PaymentMethod | undefined,
+        req.query.category as string | undefined
+      );
+      res.json({ success: true, data, message: "Dashboard diario consultado" });
+    } catch (error) { next(error); }
+  };
+
+  public services = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getServices(
+        String(req.query.from ?? ""), String(req.query.to ?? ""), req.query.category as string | undefined
+      );
+      res.json({ success: true, data, message: "Reporte de servicios consultado" });
+    } catch (error) { next(error); }
+  };
+
+  public monthlyRevenue = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getMonthlyRevenue(Number(req.query.year));
+      res.json({ success: true, data, message: "Ingresos mensuales consultados" });
+    } catch (error) { next(error); }
+  };
+
+  public receivables = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getReceivables();
+      res.json({ success: true, data, message: "Cuentas por cobrar consultadas" });
+    } catch (error) { next(error); }
+  };
+
+  public revenueCategories = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getRevenueCategories(String(req.query.from ?? ""), String(req.query.to ?? ""));
+      res.json({ success: true, data, message: "Ingresos por categoría consultados" });
+    } catch (error) { next(error); }
+  };
+
   private getFilters(req: Request) {
     return {
       sessionId: req.query.sessionId === undefined ? undefined : Number(req.query.sessionId),

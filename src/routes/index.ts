@@ -12,6 +12,7 @@ import { paymentRouter, reservationRouter, roomRouter } from "./reservation.rout
 import { serviceCatalogRouter, serviceConsumptionRouter, stayRouter } from "./stay.routes.js";
 import { invoiceRouter } from "./invoice.routes.js";
 import { reportRouter } from "./report.routes.js";
+import { attendanceRouter } from "./attendance.routes.js";
 
 export const apiRouter = Router();
 
@@ -26,6 +27,7 @@ apiRouter.use("/service-catalog", serviceCatalogRouter);
 apiRouter.use("/service-consumptions", serviceConsumptionRouter);
 apiRouter.use("/invoices", invoiceRouter);
 apiRouter.use("/reports", reportRouter);
+apiRouter.use("/attendance", attendanceRouter);
 apiRouter.use("/guests", guestRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/food-orders", foodOrderRouter);

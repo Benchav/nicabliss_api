@@ -230,6 +230,154 @@ export class ReportService {
     return { sessionId: session.id, method: filters.method, rows };
   }
 
+  public async getDailyDashboard(date: string, method?: PaymentMethod, category?: string) {
+    this.validateDate(date, "date");
+    const validatedMethod = this.validateFilters({ method }).method;
+    const data = await this.repository.getDailyDashboard(date, validatedMethod, category?.trim() || undefined);
+    const methodMap = new Map(data.methods.map((row) => [String(row.payment_method), {
+      method: String(row.payment_method) as PaymentMethod,
+      amount: centsToMoney(Number(row.total_cents)),
+      operationCount: Number(row.operation_count),
+    }]));
+    const methods = paymentMethods.map((paymentMethod) => methodMap.get(paymentMethod) ?? {
+      method: paymentMethod, amount: 0, operationCount: 0,
+    });
+    const reservations = data.reservations;
+    return {
+      date,
+      filters: { method: validatedMethod, category: category?.trim() || undefined },
+      income: {
+        collected: centsToMoney(data.collectedCents),
+        invoiced: centsToMoney(data.invoicedCents),
+        pending: centsToMoney(data.receivableCents),
+        advances: centsToMoney(data.advanceCents),
+      },
+      byMethod: methods,
+      byCategory: data.categories.map((row) => ({
+        category: String(row.category), amount: centsToMoney(Number(row.total_cents)),
+      })),
+      activeCustomers: data.activeCustomers,
+      reservations: {
+        created: Number(reservations.created_count ?? 0),
+        arrivals: Number(reservations.arrival_count ?? 0),
+        departures: Number(reservations.departure_count ?? 0),
+      },
+      receivables: { count: data.receivableCount, amount: centsToMoney(data.receivableCents) },
+      cash: data.cash ? {
+        open: true,
+        sessionId: Number(data.cash.id),
+        responsible: String(data.cash.responsable),
+        openedAt: String(data.cash.apertura),
+      } : { open: false },
+      recentPayments: data.recent.map((row) => ({
+        paymentNumber: String(row.payment_number),
+        customerName: String(row.customer_name),
+        reservationCode: row.codigo_reserva ? String(row.codigo_reserva) : undefined,
+        method: row.payment_method as PaymentMethod,
+        kind: row.kind as "PAYMENT" | "REVERSAL",
+        amount: centsToMoney((row.kind === "REVERSAL" ? -1 : 1) * Number(row.amount_cents)),
+        paymentDate: String(row.payment_date),
+      })),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  public async getServices(from: string, to: string, category?: string) {
+    this.validateRange(from, to);
+    const rows = await this.repository.getServicesReport(from, to, category?.trim() || undefined);
+    const items = rows.map((row) => ({
+      category: String(row.categoria),
+      serviceName: String(row.service_name),
+      consumptionCount: Number(row.consumption_count),
+      quantity: Number(row.quantity),
+      revenue: centsToMoney(Number(row.total_cents)),
+    }));
+    return {
+      from, to, category: category?.trim() || undefined,
+      totals: {
+        consumptionCount: items.reduce((sum, item) => sum + item.consumptionCount, 0),
+        quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+        revenue: Number(items.reduce((sum, item) => sum + item.revenue, 0).toFixed(2)),
+      },
+      items,
+    };
+  }
+
+  public async getMonthlyRevenue(yearInput: number) {
+    const year = Number(yearInput);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "year debe estar entre 2000 y 2100" };
+    }
+    const data = await this.repository.getMonthlyRevenue(year);
+    const invoiced = new Map(data.invoiced.map((row) => [Number(row.month), row]));
+    const collected = new Map(data.collected.map((row) => [Number(row.month), row]));
+    const months = Array.from({ length: 12 }, (_, index) => {
+      const month = index + 1;
+      const invoiceRow = invoiced.get(month);
+      const paymentRow = collected.get(month);
+      return {
+        month,
+        invoiced: centsToMoney(Number(invoiceRow?.invoiced_cents ?? 0)),
+        collected: centsToMoney(Number(paymentRow?.collected_cents ?? 0)),
+        pending: centsToMoney(Number(invoiceRow?.pending_cents ?? 0)),
+      };
+    });
+    return {
+      year,
+      totals: {
+        invoiced: Number(months.reduce((sum, row) => sum + row.invoiced, 0).toFixed(2)),
+        collected: Number(months.reduce((sum, row) => sum + row.collected, 0).toFixed(2)),
+        pending: Number(months.reduce((sum, row) => sum + row.pending, 0).toFixed(2)),
+      },
+      months,
+    };
+  }
+
+  public async getReceivables() {
+    const rows = await this.repository.getReceivables();
+    const now = Date.now();
+    const items = rows.map((row) => {
+      const issuedAt = String(row.issued_at);
+      return {
+        invoiceId: Number(row.id),
+        invoiceNumber: String(row.invoice_number),
+        customerId: Number(row.customer_id),
+        customerName: String(row.customer_name),
+        customerDocument: String(row.customer_document),
+        reservationCode: String(row.codigo_reserva),
+        room: String(row.habitacion),
+        total: centsToMoney(Number(row.total_cents)),
+        paid: centsToMoney(Number(row.paid_amount_cents)),
+        balance: centsToMoney(Number(row.balance_cents)),
+        status: String(row.status),
+        issuedAt,
+        ageDays: Math.max(0, Math.floor((now - new Date(issuedAt).getTime()) / 86_400_000)),
+      };
+    });
+    return {
+      totals: {
+        count: items.length,
+        balance: Number(items.reduce((sum, item) => sum + item.balance, 0).toFixed(2)),
+      },
+      items,
+    };
+  }
+
+  public async getRevenueCategories(from: string, to: string) {
+    this.validateRange(from, to);
+    const rows = await this.repository.getRevenueCategories(from, to);
+    const items = rows.map((row) => ({
+      category: String(row.category),
+      lineCount: Number(row.line_count),
+      invoiced: centsToMoney(Number(row.total_cents)),
+    }));
+    return {
+      from, to,
+      total: Number(items.reduce((sum, item) => sum + item.invoiced, 0).toFixed(2)),
+      items,
+    };
+  }
+
   private mapItem(payment: PaymentReconciliationRow, sessionId: number): CashReconciliationItem {
     const issues: ReconciliationIssue[] = [];
     const expectedCents = signedPayment(payment);
@@ -272,5 +420,23 @@ export class ReportService {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Método de pago inválido" };
     }
     return { sessionId, method: input.method, userId: input.userId?.trim() || undefined };
+  }
+
+  private validateRange(from: string, to: string): void {
+    this.validateDate(from, "from");
+    this.validateDate(to, "to");
+    if (to < from) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "to no puede ser anterior a from" };
+    }
+  }
+
+  private validateDate(value: string, field: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: `${field} debe usar formato YYYY-MM-DD` };
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: `${field} no es una fecha válida` };
+    }
   }
 }

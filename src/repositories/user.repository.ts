@@ -65,6 +65,41 @@ export class UserRepository {
     });
   }
 
+  public async saveWithRoleAudit(
+    user: UserModel,
+    previousRole: UserRole,
+    changedBy?: string,
+    ipAddress?: string
+  ): Promise<void> {
+    const createdAt = new Date().toISOString();
+    await dbClient.batch([
+      {
+        sql: `INSERT INTO users (id, username, email, password_hash, role, full_name, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                username = excluded.username,
+                email = excluded.email,
+                password_hash = excluded.password_hash,
+                role = excluded.role,
+                full_name = excluded.full_name;`,
+        args: [user.id, user.username, user.email, user.passwordHash, user.role, user.fullName, user.createdAt],
+      },
+      {
+        sql: `INSERT INTO audit_logs (
+                user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
+              ) VALUES (?, 'ROLE_CHANGE', 'user', ?, ?, ?, ?, ?);`,
+        args: [
+          changedBy ?? null,
+          user.id,
+          JSON.stringify({ role: previousRole }),
+          JSON.stringify({ role: user.role }),
+          ipAddress ?? null,
+          createdAt,
+        ],
+      },
+    ], "write");
+  }
+
   public async findAll(): Promise<UserModel[]> {
     const result = await dbClient.execute(`SELECT * FROM users ORDER BY created_at DESC;`);
     return result.rows.map(mapRowToUser);
@@ -79,6 +114,13 @@ export class UserRepository {
   }
 
   public async reset(): Promise<void> {
-    await dbClient.execute(`DELETE FROM users WHERE username != 'admin';`);
+    await dbClient.batch([
+      { sql: `DELETE FROM attendance_records
+              WHERE user_id IN (SELECT id FROM users WHERE username != 'admin')
+                 OR registered_by IN (SELECT id FROM users WHERE username != 'admin');`, args: [] },
+      { sql: `DELETE FROM staff_schedules
+              WHERE user_id IN (SELECT id FROM users WHERE username != 'admin');`, args: [] },
+      { sql: `DELETE FROM users WHERE username != 'admin';`, args: [] },
+    ], "write");
   }
 }

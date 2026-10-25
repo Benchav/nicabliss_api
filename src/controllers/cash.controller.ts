@@ -27,7 +27,7 @@ export class CashController {
 
   public closeSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.cashService.closeSession(req.body);
+      const data = await this.cashService.closeSession(req.body, req.user!.sub, req.ip);
       res.json({ success: true, data });
     } catch (err) { next(err); }
   };

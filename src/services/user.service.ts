@@ -84,12 +84,18 @@ export class UserService {
     return this.mapToResponse(newUser);
   }
 
-  public async update(id: string, dto: UpdateUserDto, _currentUserId?: string): Promise<UserResponseDto> {
+  public async update(
+    id: string,
+    dto: UpdateUserDto,
+    currentUserId?: string,
+    ipAddress?: string
+  ): Promise<UserResponseDto> {
     const user = await this.userRepo.findById(id);
     if (!user) {
       throw { statusCode: 404, code: "NOT_FOUND", message: `Usuario con ID '${id}' no encontrado` };
     }
 
+    const previousRole = user.role;
     const isRootAdmin = user.id === "usr_admin_001" || user.username.toLowerCase() === "admin";
 
     // Validar protecciones de Root Admin
@@ -117,6 +123,13 @@ export class UserService {
           statusCode: 400,
           code: "VALIDATION_ERROR",
           message: `Rol inválido. Valores permitidos: ${VALID_ROLES.join(", ")}`,
+        };
+      }
+      if (currentUserId === id && dto.role !== user.role) {
+        throw {
+          statusCode: 400,
+          code: "SELF_ROLE_CHANGE",
+          message: "No puedes cambiar el rol de tu propia sesión activa",
         };
       }
       user.role = dto.role;
@@ -165,7 +178,11 @@ export class UserService {
       user.fullName = dto.fullName.trim();
     }
 
-    await this.userRepo.save(user);
+    if (user.role !== previousRole) {
+      await this.userRepo.saveWithRoleAudit(user, previousRole, currentUserId, ipAddress);
+    } else {
+      await this.userRepo.save(user);
+    }
     return this.mapToResponse(user);
   }
 

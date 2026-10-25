@@ -127,6 +127,46 @@ export class CashRepository {
     await this.saveCurrentSession({ ...session, isClosed: true });
   }
 
+  public async closeWithAudit(
+    session: CashSessionModel,
+    userId?: string,
+    ipAddress?: string
+  ): Promise<void> {
+    const createdAt = new Date().toISOString();
+    await dbClient.batch([
+      {
+        sql: `UPDATE cash_sessions SET
+                cierre = ?, efectivo_contado = ?, diferencia = ?, observaciones = ?, is_closed = 1
+              WHERE id = ? AND is_closed = 0;`,
+        args: [
+          session.cierre ?? null,
+          session.efectivoContado ?? null,
+          session.diferencia ?? null,
+          session.observaciones,
+          session.id,
+        ],
+      },
+      {
+        sql: `INSERT INTO audit_logs (
+                user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
+              ) VALUES (?, 'CLOSE', 'cash_session', ?, ?, ?, ?, ?);`,
+        args: [
+          userId ?? null,
+          String(session.id),
+          JSON.stringify({ isClosed: false }),
+          JSON.stringify({
+            isClosed: true,
+            efectivoEsperado: session.efectivoEsperado,
+            efectivoContado: session.efectivoContado,
+            diferencia: session.diferencia,
+          }),
+          ipAddress ?? null,
+          createdAt,
+        ],
+      },
+    ], "write");
+  }
+
   public async getHistory(): Promise<CashSessionModel[]> {
     const result = await dbClient.execute(`SELECT * FROM cash_sessions WHERE is_closed = 1 ORDER BY id DESC;`);
     const history: CashSessionModel[] = [];
