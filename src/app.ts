@@ -1,6 +1,6 @@
 import express, { Application, Request, Response } from "express";
 import cors, { CorsOptions } from "cors";
-import helmet from "helmet";
+import * as helmetModule from "helmet";
 import { config } from "./config/env.js";
 import { requestLogger } from "./middlewares/logger.middleware.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
@@ -29,7 +29,7 @@ export function createApp(): Application {
   };
 
   // Seguridad HTTP y CORS
-  app.use(helmet());
+  app.use(helmetModule.default());
   app.use(cors(corsOptions));
 
   // Manejo explícito de preflight OPTIONS
