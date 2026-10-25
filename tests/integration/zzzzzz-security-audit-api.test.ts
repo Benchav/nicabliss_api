@@ -50,7 +50,7 @@ describe("Security, RBAC, and audit integration", () => {
       body: JSON.stringify({
         username,
         email: `${username}@nicabliss.test`,
-        password: "secure123",
+        password: "secure123456",
         fullName: `Seguridad ${username}`,
         role,
       }),
@@ -64,7 +64,7 @@ describe("Security, RBAC, and audit integration", () => {
     staffId = staff.id;
     const login = await request(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ usuario: "phase7_staff", password: "secure123" }) },
+      { method: "POST", body: JSON.stringify({ usuario: "phase7_staff", password: "secure123456" }) },
       undefined
     );
     staffToken = login.body.data.token;
@@ -97,7 +97,7 @@ describe("Security, RBAC, and audit integration", () => {
     roleTargetId = target.id;
     const targetLogin = await request(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ usuario: "phase7_role_target", password: "secure123" }) },
+      { method: "POST", body: JSON.stringify({ usuario: "phase7_role_target", password: "secure123456" }) },
       undefined
     );
     const targetToken = targetLogin.body.data.token;
@@ -110,7 +110,15 @@ describe("Security, RBAC, and audit integration", () => {
     assert.equal(changed.status, 200);
     assert.equal(changed.body.data.role, "RECEPTIONIST");
     const afterPromotion = await request("/api/v1/reports/dashboard?date=2026-10-24", {}, targetToken);
-    assert.equal(afterPromotion.status, 200, "El mismo JWT debe adoptar el rol vigente en base de datos");
+    assert.equal(afterPromotion.status, 401, "El cambio de rol debe revocar el JWT anterior");
+    assert.equal(afterPromotion.body.error.code, "SESSION_REVOKED");
+    const promotedLogin = await request(
+      "/api/v1/auth/login",
+      { method: "POST", body: JSON.stringify({ usuario: "phase7_role_target", password: "secure123456" }) },
+      undefined
+    );
+    const afterFreshLogin = await request("/api/v1/reports/dashboard?date=2026-10-24", {}, promotedLogin.body.data.token);
+    assert.equal(afterFreshLogin.status, 200);
 
     const audit = await dbClient.execute({
       sql: `SELECT * FROM audit_logs
@@ -127,7 +135,7 @@ describe("Security, RBAC, and audit integration", () => {
     const secondaryAdmin = await createUser("phase7_admin", "ADMIN");
     const login = await request(
       "/api/v1/auth/login",
-      { method: "POST", body: JSON.stringify({ usuario: "phase7_admin", password: "secure123" }) },
+      { method: "POST", body: JSON.stringify({ usuario: "phase7_admin", password: "secure123456" }) },
       undefined
     );
     const selfChange = await request(

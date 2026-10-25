@@ -6,6 +6,7 @@ export interface JwtPayload {
   username: string;
   role: string;
   email?: string;
+  version: number;
 }
 
 export class JwtProvider {

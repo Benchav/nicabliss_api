@@ -1,5 +1,6 @@
 import { dbClient } from "../db/client.js";
 import { PaymentMethod } from "../models/payment.model.js";
+import type { UtcRange } from "../utils/business-time.js";
 
 export interface CashReportFilters {
   sessionId?: number;
@@ -224,28 +225,32 @@ export class ReportRepository {
     return result.rows.map((row) => ({ userId: String(row.user_id), userName: String(row.user_name) }));
   }
 
-  public async getDailyDashboard(date: string, method?: PaymentMethod, category?: string) {
+  public async getDailyDashboard(date: string, range: UtcRange, method?: PaymentMethod, category?: string) {
     const paymentMethodCondition = method ? " AND p.payment_method = ?" : "";
-    const paymentArgs: Array<string> = method ? [date, method] : [date];
+    const paymentArgs: Array<string> = method
+      ? [range.startUtc, range.endUtc, method]
+      : [range.startUtc, range.endUtc];
     const categoryCondition = category
       ? ` AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?`
       : "";
-    const invoiceArgs: Array<string> = category ? [date, category] : [date];
-    const endOfDay = `${date}T23:59:59.999Z`;
+    const invoiceArgs: Array<string> = category
+      ? [range.startUtc, range.endUtc, category]
+      : [range.startUtc, range.endUtc];
 
     const [payments, methods, invoiced, advances, categories, activeCustomers, reservations, receivables, cash, recent] = await Promise.all([
       dbClient.execute({
         sql: `SELECT COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents
-              FROM payments p WHERE substr(p.payment_date, 1, 10) = ?${paymentMethodCondition};`,
+              FROM payments p
+              WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition};`,
         args: paymentArgs,
       }),
       dbClient.execute({
         sql: `SELECT p.payment_method,
                      COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents,
                      COUNT(*) AS operation_count
-              FROM payments p WHERE substr(p.payment_date, 1, 10) = ?
-              GROUP BY p.payment_method ORDER BY p.payment_method;`,
-        args: [date],
+               FROM payments p WHERE p.payment_date >= ? AND p.payment_date < ?
+               GROUP BY p.payment_method ORDER BY p.payment_method;`,
+        args: [range.startUtc, range.endUtc],
       }),
       dbClient.execute({
         sql: `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
@@ -253,14 +258,15 @@ export class ReportRepository {
               JOIN invoices i ON i.id = ii.invoice_id
               LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
               LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-              WHERE i.status <> 'Anulada' AND substr(i.issued_at, 1, 10) = ?${categoryCondition};`,
+               WHERE i.status <> 'Anulada'
+                 AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition};`,
         args: invoiceArgs,
       }),
       dbClient.execute({
         sql: `SELECT COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents
               FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id
-              WHERE substr(p.payment_date, 1, 10) = ?
-                AND (i.issued_at IS NULL OR p.payment_date < i.issued_at)${paymentMethodCondition};`,
+               WHERE p.payment_date >= ? AND p.payment_date < ?
+                 AND (i.issued_at IS NULL OR p.payment_date < i.issued_at)${paymentMethodCondition};`,
         args: paymentArgs,
       }),
       dbClient.execute({
@@ -270,29 +276,29 @@ export class ReportRepository {
               JOIN invoices i ON i.id = ii.invoice_id
               LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
               LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-              WHERE i.status <> 'Anulada' AND substr(i.issued_at, 1, 10) = ?
-              GROUP BY category ORDER BY total_cents DESC;`,
-        args: [date],
+               WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?
+               GROUP BY category ORDER BY total_cents DESC;`,
+        args: [range.startUtc, range.endUtc],
       }),
       dbClient.execute({
         sql: `SELECT COUNT(DISTINCT customer_id) AS count FROM stays
-              WHERE check_in_at <= ? AND (check_out_at IS NULL OR check_out_at > ?)
-                AND estado <> 'Cancelada';`,
-        args: [endOfDay, `${date}T00:00:00.000Z`],
+               WHERE check_in_at < ? AND (check_out_at IS NULL OR check_out_at > ?)
+                 AND estado <> 'Cancelada';`,
+        args: [range.endUtc, range.startUtc],
       }),
       dbClient.execute({
         sql: `SELECT
-                SUM(CASE WHEN substr(created_at, 1, 10) = ? THEN 1 ELSE 0 END) AS created_count,
+                SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) AS created_count,
                 SUM(CASE WHEN fecha_entrada = ? AND estado <> 'Cancelada' THEN 1 ELSE 0 END) AS arrival_count,
                 SUM(CASE WHEN fecha_salida = ? AND estado <> 'Cancelada' THEN 1 ELSE 0 END) AS departure_count
               FROM reservations;`,
-        args: [date, date, date],
+        args: [range.startUtc, range.endUtc, date, date],
       }),
       dbClient.execute({
         sql: `SELECT COALESCE(SUM(balance_cents), 0) AS total_cents, COUNT(*) AS count
               FROM invoices
-              WHERE status IN ('Emitida', 'Parcial') AND issued_at <= ?;`,
-        args: [endOfDay],
+               WHERE status IN ('Emitida', 'Parcial') AND issued_at < ?;`,
+        args: [range.endUtc],
       }),
       dbClient.execute("SELECT id, responsable, apertura FROM cash_sessions WHERE is_closed = 0 ORDER BY id DESC LIMIT 1;"),
       dbClient.execute({
@@ -302,8 +308,8 @@ export class ReportRepository {
               FROM payments p
               JOIN customers c ON c.id = p.customer_id
               LEFT JOIN reservations r ON r.id = p.reservation_id
-              WHERE substr(p.payment_date, 1, 10) = ?${paymentMethodCondition}
-              ORDER BY p.payment_date DESC, p.id DESC LIMIT 8;`,
+               WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition}
+               ORDER BY p.payment_date DESC, p.id DESC LIMIT 8;`,
         args: paymentArgs,
       }),
     ]);
@@ -323,9 +329,9 @@ export class ReportRepository {
     };
   }
 
-  public async getServicesReport(from: string, to: string, category?: string) {
-    const conditions = ["substr(sc.consumed_at, 1, 10) BETWEEN ? AND ?", "sc.estado IN ('Entregado', 'Consumido')"];
-    const args: string[] = [from, to];
+  public async getServicesReport(range: UtcRange, category?: string) {
+    const conditions = ["sc.consumed_at >= ? AND sc.consumed_at < ?", "sc.estado IN ('Entregado', 'Consumido')"];
+    const args: string[] = [range.startUtc, range.endUtc];
     if (category) {
       conditions.push("cat.categoria = ?");
       args.push(category);
@@ -343,26 +349,32 @@ export class ReportRepository {
     return result.rows;
   }
 
-  public async getMonthlyRevenue(year: number) {
-    const prefix = `${year}-`;
-    const [invoiced, collected] = await Promise.all([
-      dbClient.execute({
-        sql: `SELECT CAST(substr(issued_at, 6, 2) AS INTEGER) AS month,
-                     COALESCE(SUM(total_cents), 0) AS invoiced_cents,
+  public async getMonthlyRevenue(ranges: Array<UtcRange & { month: number }>) {
+    const results = await dbClient.batch(ranges.flatMap((range) => [
+      {
+        sql: `SELECT COALESCE(SUM(total_cents), 0) AS invoiced_cents,
                      COALESCE(SUM(balance_cents), 0) AS pending_cents
-              FROM invoices WHERE status <> 'Anulada' AND substr(issued_at, 1, 5) = ?
-              GROUP BY month ORDER BY month;`,
-        args: [prefix],
-      }),
-      dbClient.execute({
-        sql: `SELECT CAST(substr(payment_date, 6, 2) AS INTEGER) AS month,
-                     COALESCE(SUM(CASE WHEN kind = 'REVERSAL' THEN -amount_cents ELSE amount_cents END), 0) AS collected_cents
-              FROM payments WHERE substr(payment_date, 1, 5) = ?
-              GROUP BY month ORDER BY month;`,
-        args: [prefix],
-      }),
-    ]);
-    return { invoiced: invoiced.rows, collected: collected.rows };
+              FROM invoices
+              WHERE status <> 'Anulada' AND issued_at >= ? AND issued_at < ?;`,
+        args: [range.startUtc, range.endUtc],
+      },
+      {
+        sql: `SELECT COALESCE(SUM(CASE WHEN kind = 'REVERSAL' THEN -amount_cents ELSE amount_cents END), 0) AS collected_cents
+              FROM payments WHERE payment_date >= ? AND payment_date < ?;`,
+        args: [range.startUtc, range.endUtc],
+      },
+    ]), "read");
+    return {
+      invoiced: ranges.map((range, index) => ({
+        month: range.month,
+        invoiced_cents: Number(results[index * 2].rows[0]?.invoiced_cents ?? 0),
+        pending_cents: Number(results[index * 2].rows[0]?.pending_cents ?? 0),
+      })),
+      collected: ranges.map((range, index) => ({
+        month: range.month,
+        collected_cents: Number(results[index * 2 + 1].rows[0]?.collected_cents ?? 0),
+      })),
+    };
   }
 
   public async getReceivables() {
@@ -381,7 +393,7 @@ export class ReportRepository {
     return result.rows;
   }
 
-  public async getRevenueCategories(from: string, to: string) {
+  public async getRevenueCategories(range: UtcRange) {
     const result = await dbClient.execute({
       sql: `SELECT CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
                    COUNT(*) AS line_count, COALESCE(SUM(ii.total_cents), 0) AS total_cents
@@ -389,9 +401,9 @@ export class ReportRepository {
             JOIN invoices i ON i.id = ii.invoice_id
             LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
             LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-            WHERE i.status <> 'Anulada' AND substr(i.issued_at, 1, 10) BETWEEN ? AND ?
+             WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?
             GROUP BY category ORDER BY total_cents DESC;`,
-      args: [from, to],
+      args: [range.startUtc, range.endUtc],
     });
     return result.rows;
   }

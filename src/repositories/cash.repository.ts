@@ -1,5 +1,6 @@
 import { CashSessionModel, CashMovementModel, MetodoPago, TipoMovimiento, ConceptoMovimiento } from "../models/cash.model.js";
 import { dbClient } from "../db/client.js";
+import { assertTestDatabase } from "../db/test-database-guard.js";
 
 function mapRowToMovement(row: any): CashMovementModel {
   return {
@@ -184,6 +185,7 @@ export class CashRepository {
   }
 
   public async reset(): Promise<void> {
+    assertTestDatabase("CashRepository.reset");
     const now = new Date().toISOString();
     await dbClient.batch([
       {

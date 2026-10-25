@@ -3,6 +3,8 @@ import { OpenCashDto, AddMovementDto, CloseCashDto } from "../dtos/cash.dto.js";
 import { CashSessionModel, CashMovementModel } from "../models/cash.model.js";
 import { ReportRepository } from "../repositories/report.repository.js";
 import { ReportService } from "./report.service.js";
+import { config } from "../config/env.js";
+import { formatBusinessDateTime } from "../utils/business-time.js";
 
 export class CashService {
   constructor(
@@ -28,7 +30,7 @@ export class CashService {
     const session: CashSessionModel = {
       id: Date.now(),
       responsable: dto.responsable.trim(),
-      apertura: new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" }),
+      apertura: formatBusinessDateTime(new Date(), config.businessTimezone),
       fondoInicial: fondo,
       ingresosEfectivo: 0,
       ingresosDigitales: 0,
@@ -60,7 +62,7 @@ export class CashService {
 
     const movimiento: CashMovementModel = {
       id: Date.now(),
-      fecha: new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" }),
+      fecha: formatBusinessDateTime(new Date(), config.businessTimezone),
       tipo: dto.tipo,
       concepto: dto.concepto,
       descripcion: dto.descripcion?.trim() || "",
@@ -121,7 +123,7 @@ export class CashService {
     session.efectivoContado = contado;
     session.diferencia = Number((contado - session.efectivoEsperado).toFixed(2));
     session.observaciones = dto.observaciones?.trim() || "";
-    session.cierre = new Date().toLocaleString("es-NI", { dateStyle: "short", timeStyle: "short" });
+    session.cierre = formatBusinessDateTime(new Date(), config.businessTimezone);
     session.isClosed = true;
 
     await this.cashRepo.closeWithAudit(session, userId, ipAddress);

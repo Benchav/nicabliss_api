@@ -1,5 +1,6 @@
 import { UserModel, UserRole } from "../models/user.model.js";
 import { dbClient } from "../db/client.js";
+import { assertTestDatabase } from "../db/test-database-guard.js";
 
 function mapRowToUser(row: any): UserModel {
   return {
@@ -10,6 +11,7 @@ function mapRowToUser(row: any): UserModel {
     role: row.role as UserRole,
     fullName: String(row.full_name),
     createdAt: String(row.created_at),
+    tokenVersion: Number(row.token_version ?? 0),
   };
 }
 
@@ -45,14 +47,15 @@ export class UserRepository {
 
   public async save(user: UserModel): Promise<void> {
     await dbClient.execute({
-      sql: `INSERT INTO users (id, username, email, password_hash, role, full_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+      sql: `INSERT INTO users (id, username, email, password_hash, role, full_name, created_at, token_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               username = excluded.username,
               email = excluded.email,
               password_hash = excluded.password_hash,
               role = excluded.role,
-              full_name = excluded.full_name;`,
+              full_name = excluded.full_name,
+              token_version = excluded.token_version;`,
       args: [
         user.id,
         user.username,
@@ -61,6 +64,7 @@ export class UserRepository {
         user.role,
         user.fullName,
         user.createdAt || new Date().toISOString(),
+        user.tokenVersion,
       ],
     });
   }
@@ -74,15 +78,16 @@ export class UserRepository {
     const createdAt = new Date().toISOString();
     await dbClient.batch([
       {
-        sql: `INSERT INTO users (id, username, email, password_hash, role, full_name, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO users (id, username, email, password_hash, role, full_name, created_at, token_version)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 username = excluded.username,
                 email = excluded.email,
                 password_hash = excluded.password_hash,
                 role = excluded.role,
-                full_name = excluded.full_name;`,
-        args: [user.id, user.username, user.email, user.passwordHash, user.role, user.fullName, user.createdAt],
+                full_name = excluded.full_name,
+                token_version = excluded.token_version;`,
+        args: [user.id, user.username, user.email, user.passwordHash, user.role, user.fullName, user.createdAt, user.tokenVersion],
       },
       {
         sql: `INSERT INTO audit_logs (
@@ -114,6 +119,7 @@ export class UserRepository {
   }
 
   public async reset(): Promise<void> {
+    assertTestDatabase("UserRepository.reset");
     await dbClient.batch([
       { sql: `DELETE FROM attendance_records
               WHERE user_id IN (SELECT id FROM users WHERE username != 'admin')

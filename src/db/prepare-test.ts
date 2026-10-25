@@ -7,8 +7,8 @@ if (config.nodeEnv !== "test") {
   throw new Error("prepare-test solo puede ejecutarse con NODE_ENV=test");
 }
 
-if (!config.turso.url.startsWith("file:")) {
-  throw new Error("Las pruebas requieren una base LibSQL local con URL file:");
+if (config.turso.url !== "file:test.db") {
+  throw new Error("Las pruebas requieren exactamente file:test.db");
 }
 
 const databasePath = config.turso.url.slice("file:".length);

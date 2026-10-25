@@ -54,7 +54,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     const created = await userService.create({
       username: "juan_recepcion",
       email: "juan@nicabliss.com",
-      password: "password123",
+      password: "password123!",
       fullName: "Juan Pérez",
       role: "RECEPTIONIST",
     });
@@ -68,8 +68,8 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     // Verificar en BD que la contraseña está hasheada
     const dbUser = await userRepo.findById(created.id);
     assert.ok(dbUser);
-    assert.notEqual(dbUser.passwordHash, "password123");
-    const valid = await PasswordHasher.compare("password123", dbUser.passwordHash);
+    assert.notEqual(dbUser.passwordHash, "password123!");
+    const valid = await PasswordHasher.compare("password123!", dbUser.passwordHash);
     assert.equal(valid, true);
   });
 
@@ -79,7 +79,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
         await userService.create({
           username: "invalido",
           email: "invalido@test.com",
-          password: "password123",
+          password: "password123!",
           fullName: "Invalido",
           role: "SUPER_GOD" as any,
         });
@@ -92,7 +92,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     );
   });
 
-  it("debe rechazar creación con contraseña menor a 4 caracteres", async () => {
+  it("debe rechazar creación con contraseña menor a 12 caracteres", async () => {
     await assert.rejects(
       async () => {
         await userService.create({
@@ -116,7 +116,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
         await userService.create({
           username: "admin",
           email: "otro_admin@nicabliss.com",
-          password: "password123",
+          password: "password123!",
           fullName: "Admin Fake",
         });
       },
@@ -132,7 +132,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     const created = await userService.create({
       username: "carlos_staff",
       email: "carlos@nicabliss.com",
-      password: "password123",
+      password: "password123!",
       fullName: "Carlos Personal",
       role: "STAFF",
     });
@@ -198,7 +198,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     const user = await userService.create({
       username: "sub_admin",
       email: "subadmin@nicabliss.com",
-      password: "password123",
+      password: "password123!",
       fullName: "Sub Administrador",
       role: "ADMIN",
     });
@@ -220,7 +220,7 @@ describe("UserService Unit Tests (Senior Guardrails & RBAC)", () => {
     const user = await userService.create({
       username: "eliminar_me",
       email: "eliminar@nicabliss.com",
-      password: "password123",
+      password: "password123!",
       fullName: "Para Borrar",
       role: "STAFF",
     });

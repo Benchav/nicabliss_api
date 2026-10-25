@@ -42,11 +42,11 @@ export class UserService {
       };
     }
 
-    if (dto.password.trim().length < 4) {
+    if (dto.password.trim().length < 12) {
       throw {
         statusCode: 400,
         code: "VALIDATION_ERROR",
-        message: "La contraseña debe tener al menos 4 caracteres",
+        message: "La contraseña debe tener al menos 12 caracteres",
       };
     }
 
@@ -78,6 +78,7 @@ export class UserService {
       role,
       fullName: dto.fullName?.trim() || dto.username.trim(),
       createdAt: new Date().toISOString(),
+      tokenVersion: 0,
     };
 
     await this.userRepo.save(newUser);
@@ -96,6 +97,7 @@ export class UserService {
     }
 
     const previousRole = user.role;
+    const passwordWillChange = dto.password !== undefined;
     const isRootAdmin = user.id === "usr_admin_001" || user.username.toLowerCase() === "admin";
 
     // Validar protecciones de Root Admin
@@ -163,11 +165,11 @@ export class UserService {
 
     // Validar cambio de contraseña
     if (dto.password) {
-      if (dto.password.trim().length < 4) {
+      if (dto.password.trim().length < 12) {
         throw {
           statusCode: 400,
           code: "VALIDATION_ERROR",
-          message: "La contraseña debe tener al menos 4 caracteres",
+          message: "La contraseña debe tener al menos 12 caracteres",
         };
       }
       user.passwordHash = await PasswordHasher.hash(dto.password);
@@ -176,6 +178,10 @@ export class UserService {
     // Validar nombre completo
     if (dto.fullName !== undefined) {
       user.fullName = dto.fullName.trim();
+    }
+
+    if (user.role !== previousRole || passwordWillChange) {
+      user.tokenVersion += 1;
     }
 
     if (user.role !== previousRole) {

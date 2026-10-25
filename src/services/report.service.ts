@@ -6,6 +6,8 @@ import {
   ReportRepository,
 } from "../repositories/report.repository.js";
 import { centsToMoney } from "../utils/money.js";
+import { config } from "../config/env.js";
+import { businessDateRange, businessMonthRanges } from "../utils/business-time.js";
 
 export type ReconciliationIssue =
   | "MISSING_MOVEMENT"
@@ -233,7 +235,8 @@ export class ReportService {
   public async getDailyDashboard(date: string, method?: PaymentMethod, category?: string) {
     this.validateDate(date, "date");
     const validatedMethod = this.validateFilters({ method }).method;
-    const data = await this.repository.getDailyDashboard(date, validatedMethod, category?.trim() || undefined);
+    const range = businessDateRange(date, date, config.businessTimezone);
+    const data = await this.repository.getDailyDashboard(date, range, validatedMethod, category?.trim() || undefined);
     const methodMap = new Map(data.methods.map((row) => [String(row.payment_method), {
       method: String(row.payment_method) as PaymentMethod,
       amount: centsToMoney(Number(row.total_cents)),
@@ -284,7 +287,10 @@ export class ReportService {
 
   public async getServices(from: string, to: string, category?: string) {
     this.validateRange(from, to);
-    const rows = await this.repository.getServicesReport(from, to, category?.trim() || undefined);
+    const rows = await this.repository.getServicesReport(
+      businessDateRange(from, to, config.businessTimezone),
+      category?.trim() || undefined
+    );
     const items = rows.map((row) => ({
       category: String(row.categoria),
       serviceName: String(row.service_name),
@@ -308,7 +314,7 @@ export class ReportService {
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "year debe estar entre 2000 y 2100" };
     }
-    const data = await this.repository.getMonthlyRevenue(year);
+    const data = await this.repository.getMonthlyRevenue(businessMonthRanges(year, config.businessTimezone));
     const invoiced = new Map(data.invoiced.map((row) => [Number(row.month), row]));
     const collected = new Map(data.collected.map((row) => [Number(row.month), row]));
     const months = Array.from({ length: 12 }, (_, index) => {
@@ -365,7 +371,9 @@ export class ReportService {
 
   public async getRevenueCategories(from: string, to: string) {
     this.validateRange(from, to);
-    const rows = await this.repository.getRevenueCategories(from, to);
+    const rows = await this.repository.getRevenueCategories(
+      businessDateRange(from, to, config.businessTimezone)
+    );
     const items = rows.map((row) => ({
       category: String(row.category),
       lineCount: Number(row.line_count),

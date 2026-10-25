@@ -1,10 +1,11 @@
 import { AttendanceStatus } from "../models/attendance.model.js";
 import { AttendanceRepository } from "../repositories/attendance.repository.js";
+import { config } from "../config/env.js";
+import { businessClockParts } from "../utils/business-time.js";
 
 function localParts(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Managua", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}`, day: new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00Z`).getUTCDay() };
+  const parts = businessClockParts(now, config.businessTimezone);
+  return { date: parts.date, time: parts.time, day: parts.dayOfWeek };
 }
 
 export class AttendanceService {

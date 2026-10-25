@@ -2,6 +2,8 @@ import PDFDocument from "pdfkit";
 import { CreateInvoiceDto } from "../dtos/invoice.dto.js";
 import { InvoiceModel, InvoiceStatus } from "../models/invoice.model.js";
 import { InvoiceRepository } from "../repositories/invoice.repository.js";
+import { config } from "../config/env.js";
+import { formatBusinessDateTime } from "../utils/business-time.js";
 
 export class InvoiceService {
   public constructor(private readonly repository: InvoiceRepository) {}
@@ -39,7 +41,7 @@ export class InvoiceService {
     document.moveDown(1.5);
     document.fontSize(14).fillColor("#111111").text(invoice.invoiceNumber);
     document.fontSize(9).text(`Estado: ${invoice.status}`);
-    document.text(`Fecha: ${new Date(invoice.issuedAt || invoice.createdAt).toLocaleString("es-NI")}`);
+    document.text(`Fecha: ${formatBusinessDateTime(invoice.issuedAt || invoice.createdAt, config.businessTimezone)}`);
     document.moveDown();
     document.fontSize(11).text(`Cliente: ${invoice.customerName}`);
     document.fontSize(9).text(`Documento: ${invoice.customerDocument}`);

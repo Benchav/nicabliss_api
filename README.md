@@ -23,6 +23,8 @@ API: `http://localhost:4000/api/v1`
 
 Salud: `http://localhost:4000/health`
 
+Readiness de base y esquema: `http://localhost:4000/ready`
+
 Las migraciones y el seed no se ejecutan automáticamente. `AUTO_MIGRATE` y `ALLOW_DEMO_SEED` permanecen desactivados de forma predeterminada.
 
 ## Variables de entorno
@@ -31,9 +33,10 @@ Las migraciones y el seed no se ejecutan automáticamente. `AUTO_MIGRATE` y `ALL
 | --- | --- |
 | `PORT` | Puerto HTTP; predeterminado `4000`. |
 | `NODE_ENV` | `development`, `test` o `production`. |
-| `JWT_SECRET` | Obligatorio en producción. |
+| `JWT_SECRET` | Obligatorio en producción, mínimo 32 caracteres aleatorios. |
 | `JWT_EXPIRES_IN` | Vigencia del JWT; predeterminado `8h`. |
 | `CORS_ORIGIN` | Orígenes permitidos, separados por coma. |
+| `TRUST_PROXY` | Confía en un proxy; se activa automáticamente en producción. |
 | `BUSINESS_TIMEZONE` | Zona del negocio; predeterminado `America/Managua`. |
 | `TURSO_DATABASE_URL` | URL LibSQL local o remota. |
 | `TURSO_AUTH_TOKEN` | Token de Turso para una URL remota. |
@@ -53,6 +56,10 @@ Las migraciones y el seed no se ejecutan automáticamente. `AUTO_MIGRATE` y `ALL
 | `npm run lint` | Validación TypeScript sin emitir archivos. |
 | `npm test` | Recrea `file:test.db`, migra, carga seed y ejecuta la suite serial. |
 | `npm run db:migrate` | Aplica migraciones versionadas con checksum. |
+| `npm run db:backup` | Copia Turso a un SQLite local y valida integridad/conteos. |
+| `npm run db:verify` | Comprueba integridad, FK, checksums y conteos. |
+| `npm run db:production:check` | Comprueba esquema, integridad y credencial administrativa no demo. |
+| `npm run db:admin:rotate-password` | Rota la contraseña admin con confirmaciones explícitas. |
 | `npm run db:seed` | Seed de demostración; está protegido. |
 | `npm run db:legacy:preview` | Inventario de migración heredada sin escrituras. |
 | `npm run db:legacy:execute` | Ejecuta la migración heredada con protecciones remotas. |
@@ -76,8 +83,9 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 | Caja | `/cash-register/current`, `/open`, `/movements`, `/close`, `/history`. |
 | Reportes | `/reports/dashboard`, `/cash/*`, `/services`, `/revenue/monthly`, `/receivables`, `/revenue/categories`. |
 | Asistencia | `/attendance/check-in`, `/check-out`, `/today`, `/report`, `/absence`, `/schedules`. |
+| Administración heredada | `/legacy-administration/historical-accounts`, `/reviews`, `/reviews/:id/accept-unlinked` (ADMIN). |
 
-Se mantienen temporalmente los módulos heredados `/guests`, `/billing`, `/food-orders`, `/laundry` y `/dashboard` para compatibilidad durante la migración.
+`/guests` y `/billing` se mantienen exclusivamente para consulta: cualquier escritura responde `405 LEGACY_READ_ONLY`. `/food-orders` y `/laundry` siguen operativos porque sincronizan explícitamente sus consumos con el modelo nuevo.
 
 ## Reglas financieras
 
@@ -103,8 +111,9 @@ Se mantienen temporalmente los módulos heredados `/guests`, `/billing`, `/food-
 | Usuarios y roles | Sí | No | No |
 | Asistencia propia | Sí | Sí | Sí |
 | Horarios, ausencias y reporte de asistencia | Sí | No | No |
+| Cuentas históricas y conciliación heredada | Sí | No | No |
 
-El middleware consulta el rol vigente en la base en cada solicitud; cambiar un rol tiene efecto inmediato aunque el JWT siga vigente. No se permite cambiar el rol de la propia sesión activa.
+El middleware consulta el usuario vigente en la base en cada solicitud. Cambiar contraseña o rol incrementa la versión de seguridad y revoca todos los JWT anteriores. No se permite cambiar el rol de la propia sesión activa.
 
 ## Auditoría
 
@@ -112,7 +121,7 @@ El middleware consulta el rol vigente en la base en cada solicitud; cambiar un r
 
 ## Migraciones y datos heredados
 
-Las migraciones `001` a `007` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas.
+Las migraciones `001` a `009` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas. `008` garantiza en la base la unicidad del documento normalizado de clientes y `009` añade revocación de sesiones, resolución auditada de revisiones y rate limiting compartido para login.
 
 La migración progresiva:
 
@@ -122,6 +131,7 @@ La migración progresiva:
 - guarda cuentas anteriores en `historical_accounts`;
 - registra abonos sin metadatos como método `Desconocido`, fecha de migración y `payment_date_basis='MIGRATION_DATE'`;
 - es idempotente y se previsualiza sin escribir mediante `npm run db:legacy:preview`.
+- expone las cuentas históricas y los registros `REVIEW` solo a ADMIN; aceptar un registro sin vínculo exige justificación, no crea datos financieros y deja auditoría atómica.
 
 Los comandos operativos usan `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN` del `.env` mediante Node/LibSQL, sin requerir Turso CLI:
 
@@ -132,7 +142,21 @@ npm run db:verify
 npm run db:legacy:preview
 ```
 
-Antes de cualquier operación remota, seguir [docs/turso-backup-rehearsal.md](docs/turso-backup-rehearsal.md). No ejecutar migraciones `003`–`007` ni la conversión heredada en producción sin respaldo verificado y ensayo completo sobre una copia.
+Antes de cualquier operación remota, seguir [docs/turso-backup-rehearsal.md](docs/turso-backup-rehearsal.md). No ejecutar migraciones ni la conversión heredada en producción sin respaldo verificado y ensayo completo sobre una copia.
+
+## Configuración de producción
+
+Usar `.env.production.example` como inventario para la plataforma. En producción la API no inicia si falta Turso, el token, un `JWT_SECRET` fuerte o un `CORS_ORIGIN` HTTPS. Nunca usar `AUTO_MIGRATE` ni `ALLOW_DEMO_SEED` en el despliegue.
+
+Antes de abrir tráfico:
+
+```bash
+npm run db:migrate
+npm run db:verify
+npm run db:production:check
+```
+
+`/health` es liveness y `/ready` comprueba Turso y la versión de esquema requerida. La contraseña de demostración del administrador bloquea `db:production:check` y debe rotarse de forma controlada.
 
 ## Calidad
 

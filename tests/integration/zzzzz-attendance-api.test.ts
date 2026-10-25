@@ -19,9 +19,9 @@ describe("Staff attendance integration", () => {
   }
 
   it("configures a schedule and records an idempotency-safe late check-in and check-out", async () => {
-    const staff = await request("/api/v1/users", { method: "POST", body: JSON.stringify({ username: "attendance_staff", email: "attendance@nicabliss.test", password: "12345", fullName: "Personal Asistencia", role: "STAFF" }) });
+    const staff = await request("/api/v1/users", { method: "POST", body: JSON.stringify({ username: "attendance_staff", email: "attendance@nicabliss.test", password: "attendance123", fullName: "Personal Asistencia", role: "STAFF" }) });
     assert.equal(staff.status, 201); staffId = staff.body.data.id;
-    staffToken = (await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ usuario: "attendance_staff", password: "12345" }) }, false)).body.data.token;
+    staffToken = (await request("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ usuario: "attendance_staff", password: "attendance123" }) }, false)).body.data.token;
     const schedule = await request("/api/v1/attendance/schedules", { method: "PUT", body: JSON.stringify({ userId: "usr_admin_001", dayOfWeek: day, startTime: "00:00", endTime: "23:59", active: true }) });
     assert.equal(schedule.status, 200);
     const checkIn = await request("/api/v1/attendance/check-in", { method: "POST" });

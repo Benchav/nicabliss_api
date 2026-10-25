@@ -28,6 +28,7 @@ export class AuthService {
       username: user.username,
       role: user.role,
       email: user.email,
+      version: user.tokenVersion,
     });
 
     return {
@@ -47,6 +48,9 @@ export class AuthService {
     if (!dto.username || !dto.password || !dto.email) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Nombre de usuario, email y contraseña son obligatorios" };
     }
+    if (dto.password.trim().length < 12) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La contraseña debe tener al menos 12 caracteres" };
+    }
 
     const existsByUsername = await this.userRepo.findByUsername(dto.username);
     if (existsByUsername) {
@@ -62,11 +66,12 @@ export class AuthService {
     const newUser = {
       id: `usr_${randomUUID()}`,
       username: dto.username.trim(),
-      email: dto.email.trim(),
+      email: dto.email.trim().toLowerCase(),
       passwordHash,
       role: dto.role || "RECEPTIONIST",
       fullName: dto.fullName || dto.username,
       createdAt: new Date().toISOString(),
+      tokenVersion: 0,
     };
 
     await this.userRepo.save(newUser);

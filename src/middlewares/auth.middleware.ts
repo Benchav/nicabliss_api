@@ -45,6 +45,13 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       });
       return;
     }
+    if (payload.version !== currentUser.tokenVersion) {
+      res.status(401).json({
+        success: false,
+        error: { code: "SESSION_REVOKED", message: "La sesión fue invalidada por un cambio de seguridad" },
+      });
+      return;
+    }
     req.user = {
       ...payload,
       username: currentUser.username,

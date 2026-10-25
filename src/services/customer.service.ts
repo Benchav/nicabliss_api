@@ -32,16 +32,22 @@ export class CustomerService {
       };
     }
     const now = new Date().toISOString();
-    const customer = await this.customerRepository.create({
-      nombre: dto.nombre.trim(),
-      apellido: dto.apellido?.trim() || undefined,
-      documento: dto.documento.trim(),
-      telefono: dto.telefono?.trim() || undefined,
-      correo: dto.correo?.trim().toLowerCase() || undefined,
-      direccion: dto.direccion?.trim() || undefined,
-      createdAt: now,
-      updatedAt: now,
-    });
+    let customer: CustomerModel;
+    try {
+      customer = await this.customerRepository.create({
+        nombre: dto.nombre.trim(),
+        apellido: dto.apellido?.trim() || undefined,
+        documento: dto.documento.trim(),
+        telefono: dto.telefono?.trim() || undefined,
+        correo: dto.correo?.trim().toLowerCase() || undefined,
+        direccion: dto.direccion?.trim() || undefined,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      this.rethrowDocumentConflict(error);
+      throw error;
+    }
     await this.auditService.record({
       userId,
       action: "CREATE",
@@ -61,16 +67,22 @@ export class CustomerService {
         throw { statusCode: 409, code: "CUSTOMER_DOCUMENT_EXISTS", message: "El documento pertenece a otro cliente" };
       }
     }
-    const updated = await this.customerRepository.update({
-      ...current,
-      nombre: dto.nombre?.trim() || current.nombre,
-      apellido: dto.apellido !== undefined ? dto.apellido.trim() || undefined : current.apellido,
-      documento: dto.documento?.trim() || current.documento,
-      telefono: dto.telefono !== undefined ? dto.telefono.trim() || undefined : current.telefono,
-      correo: dto.correo !== undefined ? dto.correo.trim().toLowerCase() || undefined : current.correo,
-      direccion: dto.direccion !== undefined ? dto.direccion.trim() || undefined : current.direccion,
-      updatedAt: new Date().toISOString(),
-    });
+    let updated: CustomerModel;
+    try {
+      updated = await this.customerRepository.update({
+        ...current,
+        nombre: dto.nombre?.trim() || current.nombre,
+        apellido: dto.apellido !== undefined ? dto.apellido.trim() || undefined : current.apellido,
+        documento: dto.documento?.trim() || current.documento,
+        telefono: dto.telefono !== undefined ? dto.telefono.trim() || undefined : current.telefono,
+        correo: dto.correo !== undefined ? dto.correo.trim().toLowerCase() || undefined : current.correo,
+        direccion: dto.direccion !== undefined ? dto.direccion.trim() || undefined : current.direccion,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.rethrowDocumentConflict(error);
+      throw error;
+    }
     await this.auditService.record({
       userId,
       action: "UPDATE",
@@ -81,5 +93,19 @@ export class CustomerService {
       ipAddress,
     });
     return updated;
+  }
+
+  private rethrowDocumentConflict(error: unknown): void {
+    const candidate = error as { code?: string; message?: string };
+    if (
+      candidate.code?.includes("CONSTRAINT") ||
+      candidate.message?.includes("customers.documento_normalizado")
+    ) {
+      throw {
+        statusCode: 409,
+        code: "CUSTOMER_DOCUMENT_EXISTS",
+        message: "Ya existe un cliente con ese documento",
+      };
+    }
   }
 }

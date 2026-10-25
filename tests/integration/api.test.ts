@@ -39,6 +39,14 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.body.system, "Nicabliss Hotel Management API");
   });
 
+  it("GET /ready -> confirma conexión y versión del esquema", async () => {
+    const res = await api("/ready");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, "ready");
+    assert.equal(res.body.database, "connected");
+    assert.equal(res.body.schemaVersion, "009");
+  });
+
   it("POST /api/v1/auth/login -> autentica con credenciales admin y emite JWT", async () => {
     const res = await api("/api/v1/auth/login", {
       method: "POST",
@@ -81,37 +89,29 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.body.error.code, "NOT_FOUND");
   });
 
-  it("PUT /api/v1/guests/:id -> actualiza huésped con 200 OK", async () => {
+  it("PUT /api/v1/guests/:id -> mantiene el recurso heredado en solo lectura", async () => {
     const res = await api("/api/v1/guests/1", {
       method: "PUT",
       headers: { Authorization: `Bearer ${authToken}` },
       body: JSON.stringify({ habitacion: "Habitación 10" }),
     });
-    assert.equal(res.status, 200);
-    assert.equal(res.body.success, true);
-    assert.equal(res.body.data.habitacion, "Habitación 10");
+    assert.equal(res.status, 405);
+    assert.equal(res.body.error.code, "LEGACY_READ_ONLY");
   });
 
-  it("DELETE /api/v1/guests/:id -> elimina huésped con 200 OK", async () => {
-    const createRes = await api("/api/v1/guests", {
+  it("POST /api/v1/billing -> mantiene la contabilidad heredada en solo lectura", async () => {
+    const res = await api("/api/v1/billing", {
       method: "POST",
       headers: { Authorization: `Bearer ${authToken}` },
       body: JSON.stringify({
-        nombre: "Test Delete E2E",
-        documento: "P-E2E-99",
+        huesped: "No debe crearse",
         habitacion: "Habitación 99",
-        entrada: "2026-10-20",
-        salida: "2026-10-21",
+        concepto: "Prueba",
+        total: 10,
       }),
     });
-    const guestId = createRes.body.data.id;
-
-    const deleteRes = await api(`/api/v1/guests/${guestId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-    assert.equal(deleteRes.status, 200);
-    assert.equal(deleteRes.body.success, true);
+    assert.equal(res.status, 405);
+    assert.equal(res.body.error.code, "LEGACY_READ_ONLY");
   });
 
   // --- Tests de Gestión de Usuarios y Roles (RBAC) ---
@@ -220,4 +220,3 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(deleteRes.body.success, true);
   });
 });
-
