@@ -237,22 +237,22 @@ export class ReportRepository {
       ? [range.startUtc, range.endUtc, category]
       : [range.startUtc, range.endUtc];
 
-    const [payments, methods, invoiced, advances, categories, activeCustomers, reservations, receivables, cash, recent] = await Promise.all([
-      dbClient.execute({
+    const [payments, methods, invoiced, advances, categories, activeCustomers, reservations, receivables, cash, recent] = await dbClient.batch([
+      {
         sql: `SELECT COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents
               FROM payments p
               WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition};`,
         args: paymentArgs,
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT p.payment_method,
                      COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents,
                      COUNT(*) AS operation_count
                FROM payments p WHERE p.payment_date >= ? AND p.payment_date < ?
                GROUP BY p.payment_method ORDER BY p.payment_method;`,
         args: [range.startUtc, range.endUtc],
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
               FROM invoice_items ii
               JOIN invoices i ON i.id = ii.invoice_id
@@ -261,15 +261,15 @@ export class ReportRepository {
                WHERE i.status <> 'Anulada'
                  AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition};`,
         args: invoiceArgs,
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents
               FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id
                WHERE p.payment_date >= ? AND p.payment_date < ?
                  AND (i.issued_at IS NULL OR p.payment_date < i.issued_at)${paymentMethodCondition};`,
         args: paymentArgs,
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
                      COALESCE(SUM(ii.total_cents), 0) AS total_cents
               FROM invoice_items ii
@@ -279,29 +279,29 @@ export class ReportRepository {
                WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?
                GROUP BY category ORDER BY total_cents DESC;`,
         args: [range.startUtc, range.endUtc],
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT COUNT(DISTINCT customer_id) AS count FROM stays
                WHERE check_in_at < ? AND (check_out_at IS NULL OR check_out_at > ?)
                  AND estado <> 'Cancelada';`,
         args: [range.endUtc, range.startUtc],
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT
                 SUM(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE 0 END) AS created_count,
                 SUM(CASE WHEN fecha_entrada = ? AND estado <> 'Cancelada' THEN 1 ELSE 0 END) AS arrival_count,
                 SUM(CASE WHEN fecha_salida = ? AND estado <> 'Cancelada' THEN 1 ELSE 0 END) AS departure_count
               FROM reservations;`,
         args: [range.startUtc, range.endUtc, date, date],
-      }),
-      dbClient.execute({
+      },
+      {
         sql: `SELECT COALESCE(SUM(balance_cents), 0) AS total_cents, COUNT(*) AS count
               FROM invoices
                WHERE status IN ('Emitida', 'Parcial') AND issued_at < ?;`,
         args: [range.endUtc],
-      }),
-      dbClient.execute("SELECT id, responsable, apertura FROM cash_sessions WHERE is_closed = 0 ORDER BY id DESC LIMIT 1;"),
-      dbClient.execute({
+      },
+      { sql: "SELECT id, responsable, apertura FROM cash_sessions WHERE is_closed = 0 ORDER BY id DESC LIMIT 1;", args: [] },
+      {
         sql: `SELECT p.payment_number, p.amount_cents, p.payment_method, p.kind, p.payment_date,
                      c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
                      r.codigo_reserva
@@ -311,8 +311,8 @@ export class ReportRepository {
                WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition}
                ORDER BY p.payment_date DESC, p.id DESC LIMIT 8;`,
         args: paymentArgs,
-      }),
-    ]);
+      },
+    ], "read");
 
     return {
       collectedCents: Number(payments.rows[0].total_cents),
