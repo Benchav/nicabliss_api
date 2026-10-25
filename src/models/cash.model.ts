@@ -16,6 +16,12 @@ export interface CashMovementModel {
   descripcion: string;
   metodo: MetodoPago;
   monto: number;
+  paymentId?: number;
+  customerId?: number;
+  reservationId?: number;
+  invoiceId?: number;
+  createdBy?: string;
+  source?: "MANUAL" | "PAYMENT" | "REVERSAL" | "MIGRATION";
 }
 
 export interface CashSessionModel {

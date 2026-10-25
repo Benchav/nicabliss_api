@@ -7,6 +7,7 @@ export interface PaymentModel {
   paymentNumber: string;
   customerId: number;
   reservationId?: number;
+  invoiceId?: number;
   amount: number;
   paymentMethod: PaymentMethod;
   reference?: string;

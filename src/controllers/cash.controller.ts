@@ -20,7 +20,7 @@ export class CashController {
 
   public addMovement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.cashService.addMovement(req.body);
+      const data = await this.cashService.addMovement(req.body, req.user!.sub);
       res.json({ success: true, data });
     } catch (err) { next(err); }
   };

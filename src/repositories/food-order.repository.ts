@@ -48,51 +48,60 @@ export class FoodOrderRepository {
   }
 
   public async save(order: FoodOrderModel): Promise<void> {
-    await dbClient.execute({
-      sql: `INSERT INTO food_orders (id, order_code, huesped, habitacion, productos, total, estado, fecha,
-              customer_id, stay_id, service_consumption_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              order_code = excluded.order_code,
-              huesped = excluded.huesped,
-              habitacion = excluded.habitacion,
-              productos = excluded.productos,
-              total = excluded.total,
-              estado = excluded.estado,
-              fecha = excluded.fecha,
-              customer_id = excluded.customer_id,
-              stay_id = excluded.stay_id,
-              service_consumption_id = excluded.service_consumption_id,
-              created_by = excluded.created_by;`,
-      args: [
-        order.id,
-        order.orderCode,
-        order.huesped,
-        order.habitacion,
-        order.productos,
-        order.total,
-        order.estado,
-        order.fecha,
-        order.customerId ?? null,
-        order.stayId ?? null,
-        order.serviceConsumptionId ?? null,
-        order.createdBy ?? null,
-      ],
-    });
-
-    if (order.serviceConsumptionId) {
-      const status = order.estado === "Cancelado"
-        ? "Cancelado"
-        : order.estado === "Pendiente"
-          ? "Registrado"
-          : order.estado === "En preparación"
-            ? "EnProceso"
-            : "Entregado";
-      await dbClient.execute({
-        sql: `UPDATE service_consumptions SET estado = ?, precio_unitario_cents = ?, subtotal_cents = ?,
-                observaciones = ?, updated_at = ? WHERE id = ?;`,
-        args: [status, Math.round(order.total * 100), Math.round(order.total * 100), order.productos, new Date().toISOString(), order.serviceConsumptionId],
+    const transaction = await dbClient.transaction("write");
+    try {
+      await transaction.execute({
+        sql: `INSERT INTO food_orders (id, order_code, huesped, habitacion, productos, total, estado, fecha,
+                customer_id, stay_id, service_consumption_id, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                order_code = excluded.order_code,
+                huesped = excluded.huesped,
+                habitacion = excluded.habitacion,
+                productos = excluded.productos,
+                total = excluded.total,
+                estado = excluded.estado,
+                fecha = excluded.fecha,
+                customer_id = excluded.customer_id,
+                stay_id = excluded.stay_id,
+                service_consumption_id = excluded.service_consumption_id,
+                created_by = excluded.created_by;`,
+        args: [
+          order.id,
+          order.orderCode,
+          order.huesped,
+          order.habitacion,
+          order.productos,
+          order.total,
+          order.estado,
+          order.fecha,
+          order.customerId ?? null,
+          order.stayId ?? null,
+          order.serviceConsumptionId ?? null,
+          order.createdBy ?? null,
+        ],
       });
+
+      if (order.serviceConsumptionId) {
+        const status = order.estado === "Cancelado"
+          ? "Cancelado"
+          : order.estado === "Pendiente"
+            ? "Registrado"
+            : order.estado === "En preparación"
+              ? "EnProceso"
+              : "Entregado";
+        await transaction.execute({
+          sql: `UPDATE service_consumptions SET estado = ?, precio_unitario_cents = ?, subtotal_cents = ?,
+                  observaciones = ?, updated_at = ? WHERE id = ?;`,
+          args: [status, Math.round(order.total * 100), Math.round(order.total * 100), order.productos, new Date().toISOString(), order.serviceConsumptionId],
+        });
+      }
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
     }
   }
 
@@ -138,6 +147,17 @@ export class FoodOrderRepository {
   }
 
   public async delete(id: number): Promise<boolean> {
+    const linked = await dbClient.execute({
+      sql: "SELECT service_consumption_id FROM food_orders WHERE id = ? LIMIT 1;",
+      args: [id],
+    });
+    if (linked.rows[0]?.service_consumption_id) {
+      throw {
+        statusCode: 409,
+        code: "LINKED_CONSUMPTION",
+        message: "Un pedido ligado a una estancia no puede eliminarse; debe cancelarse",
+      };
+    }
     const result = await dbClient.execute({
       sql: `DELETE FROM food_orders WHERE id = ?;`,
       args: [id],

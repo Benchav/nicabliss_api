@@ -56,49 +56,58 @@ export class LaundryRepository {
 
   public async save(order: LaundryModel): Promise<void> {
     const prendasJson = JSON.stringify(order.prendas || []);
-    await dbClient.execute({
-      sql: `INSERT INTO laundry_orders (id, huesped, habitacion, prendas, total_prendas, total, estado, fecha, observaciones,
-              customer_id, stay_id, service_consumption_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              huesped = excluded.huesped,
-              habitacion = excluded.habitacion,
-              prendas = excluded.prendas,
-              total_prendas = excluded.total_prendas,
-              total = excluded.total,
-              estado = excluded.estado,
-              fecha = excluded.fecha,
-              observaciones = excluded.observaciones,
-              customer_id = excluded.customer_id,
-              stay_id = excluded.stay_id,
-              service_consumption_id = excluded.service_consumption_id,
-              created_by = excluded.created_by;`,
-      args: [
-        order.id,
-        order.huesped,
-        order.habitacion,
-        prendasJson,
-        order.totalPrendas,
-        order.total,
-        order.estado,
-        order.fecha,
-        order.observaciones,
-        order.customerId ?? null,
-        order.stayId ?? null,
-        order.serviceConsumptionId ?? null,
-        order.createdBy ?? null,
-      ],
-    });
-
-    if (order.serviceConsumptionId) {
-      const status = order.estado === "Cancelado" ? "Cancelado"
-        : order.estado === "Pendiente" ? "Registrado"
-          : order.estado === "En proceso" ? "EnProceso" : "Entregado";
-      await dbClient.execute({
-        sql: `UPDATE service_consumptions SET estado = ?, cantidad = ?, precio_unitario_cents = 50,
-                subtotal_cents = ?, observaciones = ?, updated_at = ? WHERE id = ?;`,
-        args: [status, order.totalPrendas, Math.round(order.total * 100), order.observaciones, new Date().toISOString(), order.serviceConsumptionId],
+    const transaction = await dbClient.transaction("write");
+    try {
+      await transaction.execute({
+        sql: `INSERT INTO laundry_orders (id, huesped, habitacion, prendas, total_prendas, total, estado, fecha, observaciones,
+                customer_id, stay_id, service_consumption_id, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                huesped = excluded.huesped,
+                habitacion = excluded.habitacion,
+                prendas = excluded.prendas,
+                total_prendas = excluded.total_prendas,
+                total = excluded.total,
+                estado = excluded.estado,
+                fecha = excluded.fecha,
+                observaciones = excluded.observaciones,
+                customer_id = excluded.customer_id,
+                stay_id = excluded.stay_id,
+                service_consumption_id = excluded.service_consumption_id,
+                created_by = excluded.created_by;`,
+        args: [
+          order.id,
+          order.huesped,
+          order.habitacion,
+          prendasJson,
+          order.totalPrendas,
+          order.total,
+          order.estado,
+          order.fecha,
+          order.observaciones,
+          order.customerId ?? null,
+          order.stayId ?? null,
+          order.serviceConsumptionId ?? null,
+          order.createdBy ?? null,
+        ],
       });
+
+      if (order.serviceConsumptionId) {
+        const status = order.estado === "Cancelado" ? "Cancelado"
+          : order.estado === "Pendiente" ? "Registrado"
+            : order.estado === "En proceso" ? "EnProceso" : "Entregado";
+        await transaction.execute({
+          sql: `UPDATE service_consumptions SET estado = ?, cantidad = ?, precio_unitario_cents = 50,
+                  subtotal_cents = ?, observaciones = ?, updated_at = ? WHERE id = ?;`,
+          args: [status, order.totalPrendas, Math.round(order.total * 100), order.observaciones, new Date().toISOString(), order.serviceConsumptionId],
+        });
+      }
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
     }
   }
 
@@ -141,6 +150,17 @@ export class LaundryRepository {
   }
 
   public async delete(id: number): Promise<boolean> {
+    const linked = await dbClient.execute({
+      sql: "SELECT service_consumption_id FROM laundry_orders WHERE id = ? LIMIT 1;",
+      args: [id],
+    });
+    if (linked.rows[0]?.service_consumption_id) {
+      throw {
+        statusCode: 409,
+        code: "LINKED_CONSUMPTION",
+        message: "Una solicitud ligada a una estancia no puede eliminarse; debe cancelarse",
+      };
+    }
     const result = await dbClient.execute({
       sql: `DELETE FROM laundry_orders WHERE id = ?;`,
       args: [id],

@@ -13,6 +13,7 @@ function mapPayment(row: Record<string, unknown>): PaymentModel {
     paymentNumber: String(row.payment_number),
     customerId: Number(row.customer_id),
     reservationId: row.reservation_id ? Number(row.reservation_id) : undefined,
+    invoiceId: row.invoice_id ? Number(row.invoice_id) : undefined,
     amount: centsToMoney(Number(row.amount_cents)),
     paymentMethod: row.payment_method as PaymentMethod,
     reference: row.reference ? String(row.reference) : undefined,
@@ -32,6 +33,7 @@ function mapPayment(row: Record<string, unknown>): PaymentModel {
 
 export interface NewPaymentRecord {
   reservationId: number;
+  invoiceId?: number;
   amountCents: number;
   paymentMethod: PaymentMethod;
   reference?: string;
@@ -73,12 +75,13 @@ export class PaymentRepository {
     let paymentId = 0;
     try {
       const duplicate = await transaction.execute({
-        sql: "SELECT id, reservation_id, amount_cents, payment_method FROM payments WHERE idempotency_key = ? LIMIT 1;",
+        sql: "SELECT id, reservation_id, invoice_id, amount_cents, payment_method FROM payments WHERE idempotency_key = ? LIMIT 1;",
         args: [record.idempotencyKey],
       });
       if (duplicate.rows[0]) {
         const sameRequest =
           Number(duplicate.rows[0].reservation_id) === record.reservationId &&
+          (record.invoiceId === undefined || Number(duplicate.rows[0].invoice_id) === record.invoiceId) &&
           Number(duplicate.rows[0].amount_cents) === record.amountCents &&
           String(duplicate.rows[0].payment_method) === record.paymentMethod;
         if (!sameRequest) {
@@ -108,10 +111,37 @@ export class PaymentRepository {
         throw { statusCode: 404, code: "NOT_FOUND", message: "Reserva no encontrada" };
       }
       const reservationRow = reservation.rows[0];
-      if (!["Pendiente", "Confirmada", "CheckIn"].includes(String(reservationRow.estado))) {
-        throw { statusCode: 409, code: "INVALID_STATUS", message: "La reserva no admite pagos en su estado actual" };
+      let invoiceId = record.invoiceId;
+      if (!invoiceId) {
+        const activeInvoice = await transaction.execute({
+          sql: `SELECT id FROM invoices
+                WHERE reservation_id = ? AND status IN ('Emitida', 'Parcial')
+                ORDER BY id DESC LIMIT 1;`,
+          args: [record.reservationId],
+        });
+        invoiceId = activeInvoice.rows[0] ? Number(activeInvoice.rows[0].id) : undefined;
       }
-      const balanceCents = Number(reservationRow.total_reserva_cents) - Number(reservationRow.paid_cents);
+
+      let balanceCents: number;
+      if (invoiceId) {
+        const invoice = await transaction.execute({
+          sql: "SELECT reservation_id, balance_cents, status FROM invoices WHERE id = ? LIMIT 1;",
+          args: [invoiceId],
+        });
+        if (!invoice.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Factura no encontrada" };
+        if (Number(invoice.rows[0].reservation_id) !== record.reservationId) {
+          throw { statusCode: 409, code: "INVOICE_RESERVATION_MISMATCH", message: "La factura no pertenece a la reserva" };
+        }
+        if (!["Emitida", "Parcial"].includes(String(invoice.rows[0].status))) {
+          throw { statusCode: 409, code: "INVALID_STATUS", message: "La factura no admite pagos en su estado actual" };
+        }
+        balanceCents = Number(invoice.rows[0].balance_cents);
+      } else {
+        if (!["Pendiente", "Confirmada", "CheckIn"].includes(String(reservationRow.estado))) {
+          throw { statusCode: 409, code: "INVALID_STATUS", message: "La reserva no admite pagos en su estado actual" };
+        }
+        balanceCents = Number(reservationRow.total_reserva_cents) - Number(reservationRow.paid_cents);
+      }
       if (record.amountCents > balanceCents) {
         throw {
           statusCode: 400,
@@ -133,14 +163,15 @@ export class PaymentRepository {
       const paymentNumber = `PAY-${record.now.slice(0, 4)}-${String(sequence.rows[0].current_value).padStart(7, "0")}`;
       const inserted = await transaction.execute({
         sql: `INSERT INTO payments (
-                payment_number, customer_id, reservation_id, amount_cents,
+                payment_number, customer_id, reservation_id, invoice_id, amount_cents,
                 payment_method, reference, kind, status, payment_date,
                 received_by, cash_session_id, idempotency_key, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, 'PAYMENT', 'POSTED', ?, ?, ?, ?, ?);`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PAYMENT', 'POSTED', ?, ?, ?, ?, ?);`,
         args: [
           paymentNumber,
           reservationRow.customer_id,
           record.reservationId,
+          invoiceId ?? null,
           record.amountCents,
           record.paymentMethod,
           record.reference ?? null,
@@ -153,15 +184,15 @@ export class PaymentRepository {
       });
       paymentId = Number(inserted.lastInsertRowid);
       await transaction.execute({
-        sql: `INSERT INTO payment_allocations (payment_id, reservation_id, amount_cents, created_at)
-              VALUES (?, ?, ?, ?);`,
-        args: [paymentId, record.reservationId, record.amountCents, record.now],
+        sql: `INSERT INTO payment_allocations (payment_id, reservation_id, invoice_id, amount_cents, created_at)
+              VALUES (?, ?, ?, ?, ?);`,
+        args: [paymentId, record.reservationId, invoiceId ?? null, record.amountCents, record.now],
       });
       await transaction.execute({
         sql: `INSERT INTO cash_movements (
                 session_id, fecha, tipo, concepto, descripcion, metodo, monto,
-                payment_id, customer_id, reservation_id, created_by, source
-              ) VALUES (?, ?, 'Ingreso', 'Hospedaje', ?, ?, ?, ?, ?, ?, ?, 'PAYMENT');`,
+                payment_id, customer_id, reservation_id, invoice_id, created_by, source
+              ) VALUES (?, ?, 'Ingreso', 'Hospedaje', ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT');`,
         args: [
           cashSessionId,
           record.now,
@@ -171,6 +202,7 @@ export class PaymentRepository {
           paymentId,
           reservationRow.customer_id,
           record.reservationId,
+          invoiceId ?? null,
           record.receivedBy,
         ],
       });
@@ -198,6 +230,18 @@ export class PaymentRepository {
         });
       }
 
+      if (invoiceId) {
+        await transaction.execute({
+          sql: `UPDATE invoices SET
+                  paid_amount_cents = paid_amount_cents + ?,
+                  balance_cents = balance_cents - ?,
+                  status = CASE WHEN balance_cents - ? = 0 THEN 'Pagada' ELSE 'Parcial' END,
+                  updated_at = ?
+                WHERE id = ?;`,
+          args: [record.amountCents, record.amountCents, record.amountCents, record.now, invoiceId],
+        });
+      }
+
       await transaction.execute({
         sql: `INSERT INTO audit_logs (
                 user_id, action, entity, entity_id, new_values, ip_address, created_at
@@ -205,7 +249,7 @@ export class PaymentRepository {
         args: [
           record.receivedBy,
           String(paymentId),
-          JSON.stringify({ paymentNumber, reservationId: record.reservationId, amountCents: record.amountCents }),
+          JSON.stringify({ paymentNumber, reservationId: record.reservationId, invoiceId, amountCents: record.amountCents }),
           record.ipAddress ?? null,
           record.now,
         ],
@@ -236,7 +280,7 @@ export class PaymentRepository {
       }
 
       const original = await transaction.execute({
-        sql: `SELECT p.*, pa.amount_cents AS allocated_cents
+        sql: `SELECT p.*, pa.amount_cents AS allocated_cents, pa.invoice_id AS allocated_invoice_id
               FROM payments p
               JOIN payment_allocations pa ON pa.payment_id = p.id
               WHERE p.id = ? LIMIT 1;`,
@@ -265,14 +309,15 @@ export class PaymentRepository {
       const paymentNumber = `REV-${now.slice(0, 4)}-${String(sequence.rows[0].current_value).padStart(7, "0")}`;
       const inserted = await transaction.execute({
         sql: `INSERT INTO payments (
-                payment_number, customer_id, reservation_id, amount_cents,
+                payment_number, customer_id, reservation_id, invoice_id, amount_cents,
                 payment_method, reference, kind, status, reverses_payment_id,
                 payment_date, received_by, cash_session_id, idempotency_key, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, 'REVERSAL', 'POSTED', ?, ?, ?, ?, ?, ?);`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'REVERSAL', 'POSTED', ?, ?, ?, ?, ?, ?);`,
         args: [
           paymentNumber,
           originalRow.customer_id,
           originalRow.reservation_id,
+          originalRow.allocated_invoice_id ?? null,
           amountCents,
           originalRow.payment_method,
           `Reversión de ${originalRow.payment_number}`,
@@ -286,9 +331,9 @@ export class PaymentRepository {
       });
       reversalId = Number(inserted.lastInsertRowid);
       await transaction.execute({
-        sql: `INSERT INTO payment_allocations (payment_id, reservation_id, amount_cents, created_at)
-              VALUES (?, ?, ?, ?);`,
-        args: [reversalId, originalRow.reservation_id, originalRow.allocated_cents, now],
+        sql: `INSERT INTO payment_allocations (payment_id, reservation_id, invoice_id, amount_cents, created_at)
+              VALUES (?, ?, ?, ?, ?);`,
+        args: [reversalId, originalRow.reservation_id, originalRow.allocated_invoice_id ?? null, originalRow.allocated_cents, now],
       });
       await transaction.execute({
         sql: `UPDATE payments SET status = 'REVERSED', voided_at = ?, voided_by = ?, void_reason = ?
@@ -298,8 +343,8 @@ export class PaymentRepository {
       await transaction.execute({
         sql: `INSERT INTO cash_movements (
                 session_id, fecha, tipo, concepto, descripcion, metodo, monto,
-                payment_id, customer_id, reservation_id, created_by, source
-              ) VALUES (?, ?, 'Salida', 'Hospedaje', ?, ?, ?, ?, ?, ?, ?, 'REVERSAL');`,
+                payment_id, customer_id, reservation_id, invoice_id, created_by, source
+              ) VALUES (?, ?, 'Salida', 'Hospedaje', ?, ?, ?, ?, ?, ?, ?, ?, 'REVERSAL');`,
         args: [
           cashSessionId,
           now,
@@ -309,6 +354,7 @@ export class PaymentRepository {
           reversalId,
           originalRow.customer_id,
           originalRow.reservation_id,
+          originalRow.allocated_invoice_id ?? null,
           userId,
         ],
       });
@@ -333,6 +379,17 @@ export class PaymentRepository {
               WHERE id = ?;`,
         args: [now, originalRow.reservation_id],
       });
+      if (originalRow.allocated_invoice_id) {
+        await transaction.execute({
+          sql: `UPDATE invoices SET
+                  paid_amount_cents = paid_amount_cents - ?,
+                  balance_cents = balance_cents + ?,
+                  status = CASE WHEN paid_amount_cents - ? = 0 THEN 'Emitida' ELSE 'Parcial' END,
+                  updated_at = ?
+                WHERE id = ? AND status <> 'Anulada';`,
+          args: [amountCents, amountCents, amountCents, now, originalRow.allocated_invoice_id],
+        });
+      }
       await transaction.execute({
         sql: `INSERT INTO audit_logs (
                 user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at

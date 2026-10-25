@@ -24,6 +24,19 @@ export class PaymentController {
     } catch (error) { next(error); }
   };
 
+  public createForInvoice = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.paymentService.createForInvoice(
+        Number(req.params.id),
+        req.body,
+        req.user!.sub,
+        req.header("Idempotency-Key"),
+        req.ip
+      );
+      res.status(201).json({ success: true, data, message: "Pago aplicado a la factura" });
+    } catch (error) { next(error); }
+  };
+
   public void = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await this.paymentService.void(Number(req.params.id), req.body.reason, req.user!.sub, req.ip);

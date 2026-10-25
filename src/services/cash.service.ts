@@ -1,9 +1,14 @@
 import { CashRepository } from "../repositories/cash.repository.js";
 import { OpenCashDto, AddMovementDto, CloseCashDto } from "../dtos/cash.dto.js";
 import { CashSessionModel, CashMovementModel } from "../models/cash.model.js";
+import { ReportRepository } from "../repositories/report.repository.js";
+import { ReportService } from "./report.service.js";
 
 export class CashService {
-  constructor(private cashRepo: CashRepository) {}
+  constructor(
+    private cashRepo: CashRepository,
+    private reportService: ReportService = new ReportService(new ReportRepository())
+  ) {}
 
   public async getCurrentSession(): Promise<CashSessionModel | null> {
     return this.cashRepo.getCurrentSession();
@@ -38,7 +43,7 @@ export class CashService {
     return session;
   }
 
-  public async addMovement(dto: AddMovementDto): Promise<CashSessionModel> {
+  public async addMovement(dto: AddMovementDto, userId?: string): Promise<CashSessionModel> {
     const session = await this.cashRepo.getCurrentSession();
     if (!session || session.isClosed) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para registrar movimientos" };
@@ -61,6 +66,8 @@ export class CashService {
       descripcion: dto.descripcion?.trim() || "",
       metodo: dto.metodo,
       monto,
+      createdBy: userId,
+      source: "MANUAL",
     };
 
     session.movimientos.unshift(movimiento);
@@ -93,6 +100,22 @@ export class CashService {
     const contado = Number(dto.efectivoContado);
     if (isNaN(contado) || contado < 0) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El efectivo contado debe ser un número válido mayor o igual a 0" };
+    }
+
+    const reconciliation = await this.reportService.getCashReconciliation({ sessionId: session.id });
+    if (!reconciliation.balanced) {
+      throw {
+        statusCode: 409,
+        code: "CASH_RECONCILIATION_MISMATCH",
+        message: "La caja no puede cerrarse porque existen descuadres entre pagos y movimientos automáticos",
+        details: {
+          difference: reconciliation.totals.difference,
+          mismatchCount: reconciliation.mismatchCount,
+          missingMovementCount: reconciliation.missingMovementCount,
+          orphanMovementCount: reconciliation.orphanMovementCount,
+          sessionIntegrity: reconciliation.sessionIntegrity,
+        },
+      };
     }
 
     session.efectivoContado = contado;

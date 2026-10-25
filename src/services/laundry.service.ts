@@ -32,6 +32,9 @@ export class LaundryService {
     if (!dto.prendas || dto.prendas.length === 0) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Debe incluir al menos una prenda" };
     }
+    if (dto.prendas.some((item) => !Number.isInteger(Number(item.cantidad)) || Number(item.cantidad) <= 0)) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "Cada cantidad de prendas debe ser un entero mayor que cero" };
+    }
 
     const totalPrendas = dto.prendas.reduce((sum, p) => sum + (Number(p.cantidad) || 0), 0);
     const total = Number((totalPrendas * LaundryService.PRECIO_POR_PRENDA).toFixed(2));

@@ -2,12 +2,14 @@ import { CreatePaymentDto } from "../dtos/payment.dto.js";
 import { PaymentModel } from "../models/payment.model.js";
 import { PaymentRepository } from "../repositories/payment.repository.js";
 import { ReservationRepository } from "../repositories/reservation.repository.js";
+import { InvoiceRepository } from "../repositories/invoice.repository.js";
 import { parseMoneyToCents } from "../utils/money.js";
 
 export class PaymentService {
   public constructor(
     private readonly paymentRepository: PaymentRepository,
-    private readonly reservationRepository: ReservationRepository
+    private readonly reservationRepository: ReservationRepository,
+    private readonly invoiceRepository: InvoiceRepository = new InvoiceRepository()
   ) {}
 
   public async create(
@@ -15,7 +17,8 @@ export class PaymentService {
     dto: CreatePaymentDto,
     userId: string,
     idempotencyKey: string | undefined,
-    ipAddress?: string
+    ipAddress?: string,
+    invoiceId?: number
   ): Promise<PaymentModel> {
     if (!idempotencyKey?.trim()) {
       throw {
@@ -31,6 +34,7 @@ export class PaymentService {
     }
     return this.paymentRepository.create({
       reservationId,
+      invoiceId,
       amountCents: parseMoneyToCents(dto.amount, "amount"),
       paymentMethod: dto.paymentMethod,
       reference: dto.reference?.trim() || undefined,
@@ -39,6 +43,21 @@ export class PaymentService {
       ipAddress,
       now: new Date().toISOString(),
     });
+  }
+
+  public async createForInvoice(
+    invoiceId: number,
+    dto: CreatePaymentDto,
+    userId: string,
+    idempotencyKey: string | undefined,
+    ipAddress?: string
+  ): Promise<PaymentModel> {
+    const invoice = await this.invoiceRepository.findById(invoiceId);
+    if (!invoice) throw { statusCode: 404, code: "NOT_FOUND", message: "Factura no encontrada" };
+    if (!["Emitida", "Parcial"].includes(invoice.status)) {
+      throw { statusCode: 409, code: "INVALID_STATUS", message: "La factura no admite pagos en su estado actual" };
+    }
+    return this.create(invoice.reservationId, dto, userId, idempotencyKey, ipAddress, invoiceId);
   }
 
   public async getByReservation(reservationId: number): Promise<PaymentModel[]> {

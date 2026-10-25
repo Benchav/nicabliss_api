@@ -10,6 +10,12 @@ function mapRowToMovement(row: any): CashMovementModel {
     descripcion: String(row.descripcion || ""),
     metodo: row.metodo as MetodoPago,
     monto: Number(row.monto),
+    paymentId: row.payment_id ? Number(row.payment_id) : undefined,
+    customerId: row.customer_id ? Number(row.customer_id) : undefined,
+    reservationId: row.reservation_id ? Number(row.reservation_id) : undefined,
+    invoiceId: row.invoice_id ? Number(row.invoice_id) : undefined,
+    createdBy: row.created_by ? String(row.created_by) : undefined,
+    source: row.source ? String(row.source) as CashMovementModel["source"] : undefined,
   };
 }
 
@@ -89,16 +95,28 @@ export class CashRepository {
 
     for (const m of session.movimientos) {
       statements.push({
-        sql: `INSERT INTO cash_movements (id, session_id, fecha, tipo, concepto, descripcion, metodo, monto)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO cash_movements (
+                id, session_id, fecha, tipo, concepto, descripcion, metodo, monto,
+                payment_id, customer_id, reservation_id, invoice_id, created_by, source
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 fecha = excluded.fecha,
                 tipo = excluded.tipo,
                 concepto = excluded.concepto,
                 descripcion = excluded.descripcion,
                 metodo = excluded.metodo,
-                monto = excluded.monto;`,
-        args: [m.id, session.id, m.fecha, m.tipo, m.concepto, m.descripcion, m.metodo, m.monto],
+                monto = excluded.monto,
+                payment_id = COALESCE(cash_movements.payment_id, excluded.payment_id),
+                customer_id = COALESCE(cash_movements.customer_id, excluded.customer_id),
+                reservation_id = COALESCE(cash_movements.reservation_id, excluded.reservation_id),
+                invoice_id = COALESCE(cash_movements.invoice_id, excluded.invoice_id),
+                created_by = COALESCE(cash_movements.created_by, excluded.created_by),
+                source = CASE WHEN cash_movements.source = 'MANUAL' THEN excluded.source ELSE cash_movements.source END;`,
+        args: [
+          m.id, session.id, m.fecha, m.tipo, m.concepto, m.descripcion, m.metodo, m.monto,
+          m.paymentId ?? null, m.customerId ?? null, m.reservationId ?? null, m.invoiceId ?? null,
+          m.createdBy ?? null, m.source ?? "MANUAL",
+        ],
       });
     }
 

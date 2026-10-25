@@ -10,6 +10,8 @@ import { userRouter } from "./user.routes.js";
 import { customerRouter } from "./customer.routes.js";
 import { paymentRouter, reservationRouter, roomRouter } from "./reservation.routes.js";
 import { serviceCatalogRouter, serviceConsumptionRouter, stayRouter } from "./stay.routes.js";
+import { invoiceRouter } from "./invoice.routes.js";
+import { reportRouter } from "./report.routes.js";
 
 export const apiRouter = Router();
 
@@ -22,6 +24,8 @@ apiRouter.use("/payments", paymentRouter);
 apiRouter.use("/stays", stayRouter);
 apiRouter.use("/service-catalog", serviceCatalogRouter);
 apiRouter.use("/service-consumptions", serviceConsumptionRouter);
+apiRouter.use("/invoices", invoiceRouter);
+apiRouter.use("/reports", reportRouter);
 apiRouter.use("/guests", guestRouter);
 apiRouter.use("/billing", billingRouter);
 apiRouter.use("/food-orders", foodOrderRouter);

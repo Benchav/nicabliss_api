@@ -104,14 +104,69 @@ export class ServiceRepository {
 
   public async updateConsumptionStatus(id: number, status: ConsumptionStatus, userId: string): Promise<ServiceConsumptionModel> {
     const now = new Date().toISOString();
-    const current = await dbClient.execute({ sql: "SELECT estado FROM service_consumptions WHERE id = ?;", args: [id] });
-    if (!current.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Consumo no encontrado" };
-    await dbClient.batch([
-      { sql: "UPDATE service_consumptions SET estado = ?, updated_at = ? WHERE id = ?;", args: [status, now, id] },
-      { sql: `INSERT INTO audit_logs (user_id, action, entity, entity_id, old_values, new_values, created_at)
+    const transaction = await dbClient.transaction("write");
+    try {
+      const current = await transaction.execute({
+        sql: "SELECT estado, source_type, source_id FROM service_consumptions WHERE id = ? LIMIT 1;",
+        args: [id],
+      });
+      if (!current.rows[0]) {
+        throw { statusCode: 404, code: "NOT_FOUND", message: "Consumo no encontrado" };
+      }
+
+      await transaction.execute({
+        sql: "UPDATE service_consumptions SET estado = ?, updated_at = ? WHERE id = ?;",
+        args: [status, now, id],
+      });
+
+      const sourceType = String(current.rows[0].source_type);
+      const sourceId = current.rows[0].source_id ? Number(current.rows[0].source_id) : undefined;
+      if (sourceType === "FOOD_ORDER" && sourceId) {
+        const foodStatus = status === "Registrado"
+          ? "Pendiente"
+          : status === "EnProceso"
+            ? "En preparación"
+            : status === "Cancelado"
+              ? "Cancelado"
+              : "Entregado";
+        await transaction.execute({
+          sql: "UPDATE food_orders SET estado = ? WHERE id = ?;",
+          args: [foodStatus, sourceId],
+        });
+      } else if (sourceType === "LAUNDRY_ORDER" && sourceId) {
+        const laundryStatus = status === "Registrado"
+          ? "Pendiente"
+          : status === "EnProceso"
+            ? "En proceso"
+            : status === "Cancelado"
+              ? "Cancelado"
+              : status === "Consumido"
+                ? "Entregado"
+                : "Listo";
+        await transaction.execute({
+          sql: "UPDATE laundry_orders SET estado = ? WHERE id = ?;",
+          args: [laundryStatus, sourceId],
+        });
+      }
+
+      await transaction.execute({
+        sql: `INSERT INTO audit_logs (user_id, action, entity, entity_id, old_values, new_values, created_at)
               VALUES (?, 'STATUS_CHANGE', 'service_consumption', ?, ?, ?, ?);`,
-        args: [userId, String(id), JSON.stringify({ estado: current.rows[0].estado }), JSON.stringify({ estado: status }), now] },
-    ], "write");
+        args: [
+          userId,
+          String(id),
+          JSON.stringify({ estado: current.rows[0].estado }),
+          JSON.stringify({ estado: status }),
+          now,
+        ],
+      });
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
+    }
     const result = await dbClient.execute({ sql: `${consumptionSelect} WHERE sc.id = ?;`, args: [id] });
     return mapConsumption(result.rows[0] as Record<string, unknown>);
   }
