@@ -2,7 +2,11 @@
 
 El backend y frontend se despliegan como proyectos separados. Reservar primero ambos dominios HTTPS para evitar usar CORS abierto.
 
+Cada repositorio incluye un `vercel.json` en su raíz. En Vercel se deben crear dos proyectos independientes y seleccionar como Root Directory la raíz del repositorio correspondiente; no copiar los archivos de un proyecto al otro.
+
 ## 1. Backend
+
+`vercel.json` despliega `api/index.ts` como función Node en `iad1`, aplica un máximo de 30 segundos, deshabilita caché de respuestas API y reescribe las rutas públicas hacia Express.
 
 Configurar en la plataforma todas las variables de `.env.production.example`:
 
@@ -41,6 +45,8 @@ GET https://<backend>/ready   -> 200, schemaVersion 009
 ```
 
 ## 2. Frontend
+
+`vercel.json` fija el preset Vite, `npm ci`, `npm run build`, salida `dist`, fallback SPA para React Router, CSP y caché inmutable únicamente para assets versionados.
 
 Configurar las variables de `.env.production.example`:
 
