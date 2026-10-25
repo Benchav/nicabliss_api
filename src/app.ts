@@ -1,6 +1,6 @@
 import express, { Application, Request, Response } from "express";
 import cors, { CorsOptions } from "cors";
-import * as helmetModule from "helmet";
+import { default as helmet } from "helmet";
 import { config } from "./config/env.js";
 import { requestLogger } from "./middlewares/logger.middleware.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
@@ -29,7 +29,9 @@ export function createApp(): Application {
   };
 
   // Seguridad HTTP y CORS
-  app.use(helmetModule.default());
+  // @ts-ignore - El builder de Vercel resuelve helmet como namespace CJS (index.d.cts)
+  // aunque en runtime el paquete expone la función correctamente tanto en ESM como en CJS.
+  app.use(helmet());
   app.use(cors(corsOptions));
 
   // Manejo explícito de preflight OPTIONS
