@@ -8,6 +8,8 @@ Cada repositorio incluye un `vercel.json` en su raíz. En Vercel se deben crear 
 
 `vercel.json` despliega `api/index.ts` como función Node en `iad1`, aplica un máximo de 30 segundos, deshabilita caché de respuestas API y reescribe las rutas públicas hacia Express.
 
+No configurar `Build Command` ni `Output Directory` para el proyecto backend en Vercel. Este repositorio no genera un sitio estático: Vercel instala las dependencias y compila `api/index.ts` como función Node de forma nativa. En **Build & Development Settings**, mantener desactivados ambos overrides.
+
 Configurar en la plataforma todas las variables de `.env.production.example`:
 
 - `NODE_ENV=production`
