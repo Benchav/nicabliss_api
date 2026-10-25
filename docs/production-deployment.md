@@ -6,9 +6,9 @@ Cada repositorio incluye un `vercel.json` en su raíz. En Vercel se deben crear 
 
 ## 1. Backend
 
-`vercel.json` despliega `api/index.ts` como función Node en `iad1`, aplica un máximo de 30 segundos, deshabilita caché de respuestas API y reescribe las rutas públicas hacia Express.
+`vercel.json` selecciona el preset nativo de Express y despliega `src/app.ts` como una única función Node en `iad1`, aplica un máximo de 30 segundos y deshabilita la caché de respuestas API.
 
-No configurar `Build Command` ni `Output Directory` para el proyecto backend en Vercel. Este repositorio no genera un sitio estático: Vercel instala las dependencias y compila `api/index.ts` como función Node de forma nativa. En **Build & Development Settings**, mantener desactivados ambos overrides.
+No configurar `Build Command` ni `Output Directory` para el proyecto backend en Vercel. Este repositorio no genera un sitio estático: Vercel instala las dependencias y compila `src/app.ts` con el runtime de Express. En **Framework Settings**, seleccionar `Express` y mantener desactivados ambos overrides.
 
 Configurar en la plataforma todas las variables de `.env.production.example`:
 
