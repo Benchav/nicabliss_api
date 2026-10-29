@@ -56,6 +56,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       ...payload,
       username: currentUser.username,
       email: currentUser.email,
+      fullName: currentUser.fullName,
       role: currentUser.role,
     };
     next();

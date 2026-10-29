@@ -44,7 +44,7 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.status, "ready");
     assert.equal(res.body.database, "connected");
-    assert.equal(res.body.schemaVersion, "009");
+    assert.equal(res.body.schemaVersion, "010");
   });
 
   it("POST /api/v1/auth/login -> autentica con credenciales admin y emite JWT", async () => {

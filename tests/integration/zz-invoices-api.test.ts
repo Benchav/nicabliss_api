@@ -59,7 +59,7 @@ describe("Internal invoices integration", () => {
     if (!current.body.data) {
       const opened = await request("/api/v1/cash-register/open", {
         method: "POST",
-        body: JSON.stringify({ responsable: "Administrador", fondoInicial: 100 }),
+        body: JSON.stringify({ fondoInicial: 100 }),
       });
       assert.equal(opened.status, 201);
     }

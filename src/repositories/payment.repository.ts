@@ -75,7 +75,7 @@ export class PaymentRepository {
     let paymentId = 0;
     try {
       const duplicate = await transaction.execute({
-        sql: "SELECT id, reservation_id, invoice_id, amount_cents, payment_method FROM payments WHERE idempotency_key = ? LIMIT 1;",
+        sql: "SELECT id, reservation_id, invoice_id, amount_cents, payment_method, received_by FROM payments WHERE idempotency_key = ? LIMIT 1;",
         args: [record.idempotencyKey],
       });
       if (duplicate.rows[0]) {
@@ -83,7 +83,8 @@ export class PaymentRepository {
           Number(duplicate.rows[0].reservation_id) === record.reservationId &&
           (record.invoiceId === undefined || Number(duplicate.rows[0].invoice_id) === record.invoiceId) &&
           Number(duplicate.rows[0].amount_cents) === record.amountCents &&
-          String(duplicate.rows[0].payment_method) === record.paymentMethod;
+          String(duplicate.rows[0].payment_method) === record.paymentMethod &&
+          String(duplicate.rows[0].received_by) === record.receivedBy;
         if (!sameRequest) {
           throw {
             statusCode: 409,
@@ -150,11 +151,22 @@ export class PaymentRepository {
         };
       }
 
-      const cashSession = await transaction.execute(
-        "SELECT id FROM cash_sessions WHERE is_closed = 0 LIMIT 1;"
-      );
+      const cashSession = await transaction.execute({
+        sql: `SELECT cs.id, cs.opened_by, opener.full_name AS opened_by_name
+              FROM cash_sessions cs
+              LEFT JOIN users opener ON opener.id = cs.opened_by
+              WHERE cs.is_closed = 0 LIMIT 1;`,
+        args: [],
+      });
       if (!cashSession.rows[0]) {
         throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "Debe existir una caja abierta para registrar el pago" };
+      }
+      if (String(cashSession.rows[0].opened_by ?? "") !== record.receivedBy) {
+        throw {
+          statusCode: 403,
+          code: "CASH_SESSION_OWNER_REQUIRED",
+          message: `La caja abierta pertenece a ${String(cashSession.rows[0].opened_by_name || "otro usuario")}; solo su responsable puede registrar pagos`,
+        };
       }
       const cashSessionId = Number(cashSession.rows[0].id);
 
@@ -269,6 +281,34 @@ export class PaymentRepository {
     let reversalId = 0;
     const now = new Date().toISOString();
     try {
+      const original = await transaction.execute({
+        sql: `SELECT p.*, pa.amount_cents AS allocated_cents, pa.invoice_id AS allocated_invoice_id
+              FROM payments p
+              JOIN payment_allocations pa ON pa.payment_id = p.id
+              WHERE p.id = ? LIMIT 1;`,
+        args: [paymentId],
+      });
+      if (!original.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Pago no encontrado" };
+      const originalRow = original.rows[0];
+
+      const cashSession = await transaction.execute({
+        sql: `SELECT cs.id, cs.efectivo_esperado, cs.opened_by, opener.full_name AS opened_by_name
+              FROM cash_sessions cs
+              LEFT JOIN users opener ON opener.id = cs.opened_by
+              WHERE cs.is_closed = 0 LIMIT 1;`,
+        args: [],
+      });
+      if (!cashSession.rows[0]) {
+        throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "Debe existir una caja abierta para anular el pago" };
+      }
+      if (String(cashSession.rows[0].opened_by ?? "") !== userId) {
+        throw {
+          statusCode: 403,
+          code: "CASH_SESSION_OWNER_REQUIRED",
+          message: `La caja abierta pertenece a ${String(cashSession.rows[0].opened_by_name || "otro usuario")}; solo su responsable puede registrar reversiones`,
+        };
+      }
+
       const existingReversal = await transaction.execute({
         sql: "SELECT id FROM payments WHERE reverses_payment_id = ? LIMIT 1;",
         args: [paymentId],
@@ -279,25 +319,10 @@ export class PaymentRepository {
         return (await this.findById(reversalId))!;
       }
 
-      const original = await transaction.execute({
-        sql: `SELECT p.*, pa.amount_cents AS allocated_cents, pa.invoice_id AS allocated_invoice_id
-              FROM payments p
-              JOIN payment_allocations pa ON pa.payment_id = p.id
-              WHERE p.id = ? LIMIT 1;`,
-        args: [paymentId],
-      });
-      if (!original.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Pago no encontrado" };
-      const originalRow = original.rows[0];
       if (originalRow.kind !== "PAYMENT" || originalRow.status !== "POSTED") {
         throw { statusCode: 409, code: "INVALID_STATUS", message: "El pago no puede anularse" };
       }
 
-      const cashSession = await transaction.execute(
-        "SELECT id, efectivo_esperado FROM cash_sessions WHERE is_closed = 0 LIMIT 1;"
-      );
-      if (!cashSession.rows[0]) {
-        throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "Debe existir una caja abierta para anular el pago" };
-      }
       const cashSessionId = Number(cashSession.rows[0].id);
       const amountCents = Number(originalRow.amount_cents);
       if (originalRow.payment_method === "Efectivo" && centsToMoney(amountCents) > Number(cashSession.rows[0].efectivo_esperado)) {

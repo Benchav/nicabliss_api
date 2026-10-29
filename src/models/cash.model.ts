@@ -21,12 +21,17 @@ export interface CashMovementModel {
   reservationId?: number;
   invoiceId?: number;
   createdBy?: string;
+  createdByName?: string;
   source?: "MANUAL" | "PAYMENT" | "REVERSAL" | "MIGRATION";
 }
 
 export interface CashSessionModel {
   id: number;
   responsable: string;
+  openedBy?: string;
+  openedByName?: string;
+  closedBy?: string;
+  closedByName?: string;
   apertura: string;
   cierre?: string;
   fondoInicial: number;

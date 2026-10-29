@@ -121,7 +121,7 @@ El middleware consulta el usuario vigente en la base en cada solicitud. Cambiar 
 
 ## Migraciones y datos heredados
 
-Las migraciones `001` a `009` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas. `008` garantiza en la base la unicidad del documento normalizado de clientes y `009` añade revocación de sesiones, resolución auditada de revisiones y rate limiting compartido para login.
+Las migraciones `001` a `010` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas. `008` garantiza en la base la unicidad del documento normalizado de clientes, `009` añade revocación de sesiones, resolución auditada de revisiones y rate limiting compartido para login, y `010` atribuye sesiones de caja a usuarios, conserva las sesiones históricas sin autoría fiable e incorpora idempotencia para movimientos manuales.
 
 La migración progresiva:
 

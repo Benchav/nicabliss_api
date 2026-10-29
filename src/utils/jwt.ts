@@ -6,6 +6,7 @@ export interface JwtPayload {
   username: string;
   role: string;
   email?: string;
+  fullName?: string;
   version: number;
 }
 
