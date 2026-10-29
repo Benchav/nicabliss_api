@@ -44,7 +44,7 @@ describe("Administrative reports integration", () => {
 
   it("creates a fully traceable sale for report verification", async () => {
     const opened = await request("/api/v1/cash-register/open", {
-      method: "POST", body: JSON.stringify({ responsable: "Reportes API", fondoInicial: 100 }),
+      method: "POST", body: JSON.stringify({ fondoInicial: 100 }),
     });
     assert.equal(opened.status, 201);
     const customer = await request("/api/v1/customers", {

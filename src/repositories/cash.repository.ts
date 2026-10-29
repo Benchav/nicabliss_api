@@ -1,6 +1,10 @@
+import type { Client, Transaction } from "@libsql/client";
 import { CashSessionModel, CashMovementModel, MetodoPago, TipoMovimiento, ConceptoMovimiento } from "../models/cash.model.js";
 import { dbClient } from "../db/client.js";
 import { assertTestDatabase } from "../db/test-database-guard.js";
+import { centsToMoney, parseMoneyToCents } from "../utils/money.js";
+
+type DbExecutor = Client | Transaction;
 
 function mapRowToMovement(row: any): CashMovementModel {
   return {
@@ -16,6 +20,7 @@ function mapRowToMovement(row: any): CashMovementModel {
     reservationId: row.reservation_id ? Number(row.reservation_id) : undefined,
     invoiceId: row.invoice_id ? Number(row.invoice_id) : undefined,
     createdBy: row.created_by ? String(row.created_by) : undefined,
+    createdByName: row.created_by_name ? String(row.created_by_name) : undefined,
     source: row.source ? String(row.source) as CashMovementModel["source"] : undefined,
   };
 }
@@ -24,6 +29,10 @@ function mapRowToSession(row: any, movimientos: CashMovementModel[] = []): CashS
   return {
     id: Number(row.id),
     responsable: String(row.responsable),
+    openedBy: row.opened_by ? String(row.opened_by) : undefined,
+    openedByName: row.opened_by_name ? String(row.opened_by_name) : undefined,
+    closedBy: row.closed_by ? String(row.closed_by) : undefined,
+    closedByName: row.closed_by_name ? String(row.closed_by_name) : undefined,
     apertura: String(row.apertura),
     cierre: row.cierre ? String(row.cierre) : undefined,
     fondoInicial: Number(row.fondo_inicial),
@@ -40,141 +49,256 @@ function mapRowToSession(row: any, movimientos: CashMovementModel[] = []): CashS
 }
 
 export class CashRepository {
-  public async getCurrentSession(): Promise<CashSessionModel | null> {
-    const result = await dbClient.execute(`SELECT * FROM cash_sessions WHERE is_closed = 0 LIMIT 1;`);
+  private readonly sessionSelect = `
+    SELECT cs.*, opener.full_name AS opened_by_name, closer.full_name AS closed_by_name
+    FROM cash_sessions cs
+    LEFT JOIN users opener ON opener.id = cs.opened_by
+    LEFT JOIN users closer ON closer.id = cs.closed_by`;
+
+  public async getCurrentSession(executor: DbExecutor = dbClient): Promise<CashSessionModel | null> {
+    const result = await executor.execute({
+      sql: `${this.sessionSelect} WHERE cs.is_closed = 0 LIMIT 1;`,
+      args: [],
+    });
     if (result.rows.length === 0) return null;
 
     const row = result.rows[0];
-    const movementsResult = await dbClient.execute({
-      sql: `SELECT * FROM cash_movements WHERE session_id = ? ORDER BY id DESC;`,
+    const movementsResult = await executor.execute({
+      sql: `SELECT cm.*, u.full_name AS created_by_name
+            FROM cash_movements cm
+            LEFT JOIN users u ON u.id = cm.created_by
+            WHERE cm.session_id = ? ORDER BY cm.id DESC;`,
       args: [row.id],
     });
     const movimientos = movementsResult.rows.map(mapRowToMovement);
     return mapRowToSession(row, movimientos);
   }
 
-  public async saveCurrentSession(session: CashSessionModel | null): Promise<void> {
-    if (!session) return;
-
-    const statements: any[] = [
-      {
-        sql: `INSERT INTO cash_sessions (
-          id, responsable, apertura, cierre, fondo_inicial, ingresos_efectivo,
-          ingresos_digitales, salidas_efectivo, efectivo_esperado, efectivo_contado,
-          diferencia, observaciones, is_closed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          responsable = excluded.responsable,
-          apertura = excluded.apertura,
-          cierre = excluded.cierre,
-          fondo_inicial = excluded.fondo_inicial,
-          ingresos_efectivo = excluded.ingresos_efectivo,
-          ingresos_digitales = excluded.ingresos_digitales,
-          salidas_efectivo = excluded.salidas_efectivo,
-          efectivo_esperado = excluded.efectivo_esperado,
-          efectivo_contado = excluded.efectivo_contado,
-          diferencia = excluded.diferencia,
-          observaciones = excluded.observaciones,
-          is_closed = excluded.is_closed;`,
-        args: [
-          session.id,
-          session.responsable,
-          session.apertura,
-          session.cierre ?? null,
-          session.fondoInicial,
-          session.ingresosEfectivo,
-          session.ingresosDigitales,
-          session.salidasEfectivo,
-          session.efectivoEsperado,
-          session.efectivoContado ?? null,
-          session.diferencia ?? null,
-          session.observaciones,
-          session.isClosed ? 1 : 0,
-        ],
-      },
-    ];
-
-    for (const m of session.movimientos) {
-      statements.push({
-        sql: `INSERT INTO cash_movements (
-                id, session_id, fecha, tipo, concepto, descripcion, metodo, monto,
-                payment_id, customer_id, reservation_id, invoice_id, created_by, source
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET
-                fecha = excluded.fecha,
-                tipo = excluded.tipo,
-                concepto = excluded.concepto,
-                descripcion = excluded.descripcion,
-                metodo = excluded.metodo,
-                monto = excluded.monto,
-                payment_id = COALESCE(cash_movements.payment_id, excluded.payment_id),
-                customer_id = COALESCE(cash_movements.customer_id, excluded.customer_id),
-                reservation_id = COALESCE(cash_movements.reservation_id, excluded.reservation_id),
-                invoice_id = COALESCE(cash_movements.invoice_id, excluded.invoice_id),
-                created_by = COALESCE(cash_movements.created_by, excluded.created_by),
-                source = CASE WHEN cash_movements.source = 'MANUAL' THEN excluded.source ELSE cash_movements.source END;`,
-        args: [
-          m.id, session.id, m.fecha, m.tipo, m.concepto, m.descripcion, m.metodo, m.monto,
-          m.paymentId ?? null, m.customerId ?? null, m.reservationId ?? null, m.invoiceId ?? null,
-          m.createdBy ?? null, m.source ?? "MANUAL",
-        ],
-      });
-    }
-
-    await dbClient.batch(statements, "write");
+  public async getSessionById(id: number, executor: DbExecutor = dbClient): Promise<CashSessionModel | null> {
+    const result = await executor.execute({
+      sql: `${this.sessionSelect} WHERE cs.id = ? LIMIT 1;`,
+      args: [id],
+    });
+    if (!result.rows[0]) return null;
+    const movementsResult = await executor.execute({
+      sql: `SELECT cm.*, u.full_name AS created_by_name
+            FROM cash_movements cm
+            LEFT JOIN users u ON u.id = cm.created_by
+            WHERE cm.session_id = ? ORDER BY cm.id DESC;`,
+      args: [id],
+    });
+    return mapRowToSession(result.rows[0], movementsResult.rows.map(mapRowToMovement));
   }
 
-  public async addHistory(session: CashSessionModel): Promise<void> {
-    await this.saveCurrentSession({ ...session, isClosed: true });
+  public async openSession(
+    session: Omit<CashSessionModel, "id" | "movimientos" | "openedBy"> & { openedBy: string },
+    ipAddress?: string
+  ): Promise<CashSessionModel> {
+    const transaction = await dbClient.transaction("write");
+    let sessionId = 0;
+    try {
+      const inserted = await transaction.execute({
+        sql: `INSERT INTO cash_sessions (
+                responsable, apertura, fondo_inicial, ingresos_efectivo, ingresos_digitales,
+                salidas_efectivo, efectivo_esperado, observaciones, is_closed, opened_by
+              ) VALUES (?, ?, ?, 0, 0, 0, ?, '', 0, ?);`,
+        args: [session.responsable, session.apertura, session.fondoInicial, session.efectivoEsperado, session.openedBy],
+      });
+      sessionId = Number(inserted.lastInsertRowid);
+      await transaction.execute({
+        sql: `INSERT INTO audit_logs (
+                user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
+              ) VALUES (?, 'OPEN', 'cash_session', ?, NULL, ?, ?, ?);`,
+        args: [
+          session.openedBy,
+          String(sessionId),
+          JSON.stringify({ openedBy: session.openedBy, responsable: session.responsable, fondoInicial: session.fondoInicial }),
+          ipAddress ?? null,
+          new Date().toISOString(),
+        ],
+      });
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      if (String(error).includes("idx_unique_active_cash_session") || String(error).includes("cash_sessions.is_closed")) {
+        throw { statusCode: 409, code: "CASH_SESSION_ALREADY_OPEN", message: "Ya existe una caja abierta. Actualiza la pantalla para consultar al responsable." };
+      }
+      throw error;
+    } finally {
+      transaction.close();
+    }
+    const opened = await this.getSessionById(sessionId);
+    if (!opened) throw new Error("No se pudo recuperar la sesión de caja recién abierta");
+    return opened;
+  }
+
+  public async addManualMovement(
+    sessionId: number,
+    movement: Omit<CashMovementModel, "id">,
+    userId: string,
+    ipAddress?: string,
+    idempotencyKey?: string
+  ): Promise<CashSessionModel> {
+    const transaction = await dbClient.transaction("write");
+    try {
+      if (idempotencyKey) {
+        const duplicate = await transaction.execute({
+          sql: "SELECT * FROM cash_movements WHERE idempotency_key = ? LIMIT 1;",
+          args: [idempotencyKey],
+        });
+        if (duplicate.rows[0]) {
+          const existing = duplicate.rows[0];
+          const sameRequest = Number(existing.session_id) === sessionId
+            && String(existing.created_by) === userId
+            && String(existing.tipo) === movement.tipo
+            && String(existing.concepto) === movement.concepto
+            && String(existing.descripcion) === movement.descripcion
+            && String(existing.metodo) === movement.metodo
+            && parseMoneyToCents(Number(existing.monto)) === parseMoneyToCents(movement.monto);
+          if (!sameRequest) {
+            throw { statusCode: 409, code: "IDEMPOTENCY_CONFLICT", message: "La clave de idempotencia ya fue utilizada con otros datos" };
+          }
+          await transaction.rollback();
+          const priorSession = await this.getSessionById(Number(existing.session_id));
+          if (!priorSession) throw new Error("No se pudo recuperar el movimiento previamente registrado");
+          return priorSession;
+        }
+      }
+
+      const current = await transaction.execute({
+        sql: "SELECT opened_by, efectivo_esperado FROM cash_sessions WHERE id = ? AND is_closed = 0 LIMIT 1;",
+        args: [sessionId],
+      });
+      if (!current.rows[0]) {
+        throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "No hay una caja abierta para registrar movimientos" };
+      }
+      if (String(current.rows[0].opened_by ?? "") !== userId) {
+        throw { statusCode: 403, code: "CASH_SESSION_OWNER_REQUIRED", message: "Solo el responsable de la caja abierta puede registrar movimientos" };
+      }
+
+      const amountCents = parseMoneyToCents(movement.monto);
+      const expectedCashCents = parseMoneyToCents(Number(current.rows[0].efectivo_esperado));
+      if (movement.tipo === "Salida" && movement.metodo === "Efectivo" && amountCents > expectedCashCents) {
+        throw { statusCode: 409, code: "INSUFFICIENT_CASH", message: "La salida supera el efectivo disponible en caja" };
+      }
+
+      const inserted = await transaction.execute({
+        sql: `INSERT INTO cash_movements (
+                session_id, fecha, tipo, concepto, descripcion, metodo, monto,
+                created_by, source, idempotency_key
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?);`,
+        args: [
+          sessionId,
+          movement.fecha,
+          movement.tipo,
+          movement.concepto,
+          movement.descripcion,
+          movement.metodo,
+          centsToMoney(amountCents),
+          userId,
+          idempotencyKey ?? null,
+        ],
+      });
+
+      if (movement.tipo === "Ingreso" && movement.metodo === "Efectivo") {
+        await transaction.execute({
+          sql: `UPDATE cash_sessions SET ingresos_efectivo = ingresos_efectivo + ?,
+                  efectivo_esperado = efectivo_esperado + ? WHERE id = ? AND is_closed = 0;`,
+          args: [centsToMoney(amountCents), centsToMoney(amountCents), sessionId],
+        });
+      } else if (movement.tipo === "Ingreso") {
+        await transaction.execute({
+          sql: "UPDATE cash_sessions SET ingresos_digitales = ingresos_digitales + ? WHERE id = ? AND is_closed = 0;",
+          args: [centsToMoney(amountCents), sessionId],
+        });
+      } else if (movement.metodo === "Efectivo") {
+        await transaction.execute({
+          sql: `UPDATE cash_sessions SET salidas_efectivo = salidas_efectivo + ?,
+                  efectivo_esperado = efectivo_esperado - ? WHERE id = ? AND is_closed = 0;`,
+          args: [centsToMoney(amountCents), centsToMoney(amountCents), sessionId],
+        });
+      }
+
+      await transaction.execute({
+        sql: `INSERT INTO audit_logs (
+                user_id, action, entity, entity_id, new_values, ip_address, created_at
+              ) VALUES (?, 'CREATE', 'cash_movement', ?, ?, ?, ?);`,
+        args: [
+          userId,
+          String(inserted.lastInsertRowid),
+          JSON.stringify({ sessionId, ...movement, monto: centsToMoney(amountCents) }),
+          ipAddress ?? null,
+          new Date().toISOString(),
+        ],
+      });
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
+    }
+
+    const updated = await this.getSessionById(sessionId);
+    if (!updated) throw new Error("No se pudo recuperar la sesión de caja actualizada");
+    return updated;
   }
 
   public async closeWithAudit(
     session: CashSessionModel,
-    userId?: string,
-    ipAddress?: string
+    userId: string,
+    ipAddress: string | undefined,
+    transaction: Transaction,
+    adminOverride: boolean
   ): Promise<void> {
     const createdAt = new Date().toISOString();
-    await dbClient.batch([
-      {
-        sql: `UPDATE cash_sessions SET
-                cierre = ?, efectivo_contado = ?, diferencia = ?, observaciones = ?, is_closed = 1
-              WHERE id = ? AND is_closed = 0;`,
-        args: [
-          session.cierre ?? null,
-          session.efectivoContado ?? null,
-          session.diferencia ?? null,
-          session.observaciones,
-          session.id,
-        ],
-      },
-      {
-        sql: `INSERT INTO audit_logs (
-                user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
-              ) VALUES (?, 'CLOSE', 'cash_session', ?, ?, ?, ?, ?);`,
-        args: [
-          userId ?? null,
-          String(session.id),
-          JSON.stringify({ isClosed: false }),
-          JSON.stringify({
-            isClosed: true,
-            efectivoEsperado: session.efectivoEsperado,
-            efectivoContado: session.efectivoContado,
-            diferencia: session.diferencia,
-          }),
-          ipAddress ?? null,
-          createdAt,
-        ],
-      },
-    ], "write");
+    const updated = await transaction.execute({
+      sql: `UPDATE cash_sessions SET
+              cierre = ?, efectivo_contado = ?, diferencia = ?, observaciones = ?,
+              closed_by = ?, is_closed = 1
+            WHERE id = ? AND is_closed = 0;`,
+      args: [session.cierre ?? null, session.efectivoContado ?? null, session.diferencia ?? null,
+        session.observaciones, userId, session.id],
+    });
+    if (updated.rowsAffected !== 1) {
+      throw { statusCode: 409, code: "CASH_SESSION_CHANGED", message: "La caja ya fue cerrada o cambió durante la operación" };
+    }
+    await transaction.execute({
+      sql: `INSERT INTO audit_logs (
+              user_id, action, entity, entity_id, old_values, new_values, ip_address, created_at
+            ) VALUES (?, ?, 'cash_session', ?, ?, ?, ?, ?);`,
+      args: [
+        userId,
+        adminOverride ? "CLOSE_ADMIN_OVERRIDE" : "CLOSE",
+        String(session.id),
+        JSON.stringify({ isClosed: false, openedBy: session.openedBy }),
+        JSON.stringify({
+          isClosed: true,
+          closedBy: userId,
+          efectivoEsperado: session.efectivoEsperado,
+          efectivoContado: session.efectivoContado,
+          diferencia: session.diferencia,
+          observaciones: session.observaciones,
+        }),
+        ipAddress ?? null,
+        createdAt,
+      ],
+    });
   }
 
   public async getHistory(): Promise<CashSessionModel[]> {
-    const result = await dbClient.execute(`SELECT * FROM cash_sessions WHERE is_closed = 1 ORDER BY id DESC;`);
+    const result = await dbClient.execute({
+      sql: `${this.sessionSelect} WHERE cs.is_closed = 1 ORDER BY cs.id DESC;`,
+      args: [],
+    });
     const history: CashSessionModel[] = [];
 
     for (const row of result.rows) {
       const movementsResult = await dbClient.execute({
-        sql: `SELECT * FROM cash_movements WHERE session_id = ? ORDER BY id DESC;`,
+        sql: `SELECT cm.*, u.full_name AS created_by_name
+              FROM cash_movements cm
+              LEFT JOIN users u ON u.id = cm.created_by
+              WHERE cm.session_id = ? ORDER BY cm.id DESC;`,
         args: [row.id],
       });
       const movimientos = movementsResult.rows.map(mapRowToMovement);

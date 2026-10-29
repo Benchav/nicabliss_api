@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-const amount = z.number().finite().nonnegative().max(1_000_000_000);
+const amount = z.number().finite().nonnegative().max(1_000_000_000)
+  .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-7, "El monto admite máximo dos decimales");
 
 export const openCashSchema = z.object({
-  responsable: z.string().trim().min(1).max(160),
   fondoInicial: amount,
 });
 

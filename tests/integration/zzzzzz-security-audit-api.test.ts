@@ -191,10 +191,21 @@ describe("Security, RBAC, and audit integration", () => {
   it("writes the cash closing and its audit record atomically", async () => {
     const opened = await request("/api/v1/cash-register/open", {
       method: "POST",
-      body: JSON.stringify({ responsable: "Auditoría Fase 7", fondoInicial: 75 }),
+      body: JSON.stringify({ fondoInicial: 75 }),
     });
     assert.equal(opened.status, 201);
     cashSessionId = opened.body.data.id;
+    assert.equal(opened.body.data.openedBy, "usr_admin_001");
+    assert.equal(opened.body.data.responsable, "Administrador Nicabliss");
+
+    const openAudit = await dbClient.execute({
+      sql: `SELECT action, user_id, ip_address, new_values FROM audit_logs
+            WHERE entity = 'cash_session' AND entity_id = ? AND action = 'OPEN' LIMIT 1;`,
+      args: [String(cashSessionId)],
+    });
+    assert.equal(openAudit.rows.length, 1);
+    assert.equal(openAudit.rows[0].user_id, "usr_admin_001");
+    assert.ok(openAudit.rows[0].ip_address);
 
     const closed = await request("/api/v1/cash-register/close", {
       method: "POST",
@@ -213,8 +224,55 @@ describe("Security, RBAC, and audit integration", () => {
     assert.equal(result.rows.length, 1);
     assert.equal(Number(result.rows[0].is_closed), 1);
     assert.equal(result.rows[0].user_id, "usr_admin_001");
-    assert.deepEqual(JSON.parse(String(result.rows[0].old_values)), { isClosed: false });
+    assert.deepEqual(JSON.parse(String(result.rows[0].old_values)), { isClosed: false, openedBy: "usr_admin_001" });
     assert.equal(JSON.parse(String(result.rows[0].new_values)).diferencia, 0);
     assert.ok(result.rows[0].ip_address);
+  });
+
+  it("requires a reason and audits an administrator closing another user's cash session", async () => {
+    const overrideAdmin = await createUser("cash_override_admin", "ADMIN");
+    let overrideSessionId = 0;
+    try {
+      const login = await request(
+        "/api/v1/auth/login",
+        { method: "POST", body: JSON.stringify({ usuario: "cash_override_admin", password: "secure123456" }) },
+        undefined
+      );
+      assert.equal(login.status, 200);
+
+      const opened = await request("/api/v1/cash-register/open", {
+        method: "POST",
+        body: JSON.stringify({ fondoInicial: 20 }),
+      });
+      assert.equal(opened.status, 201);
+      overrideSessionId = opened.body.data.id;
+
+      const withoutReason = await request("/api/v1/cash-register/close", {
+        method: "POST",
+        body: JSON.stringify({ efectivoContado: 20 }),
+      }, login.body.data.token);
+      assert.equal(withoutReason.status, 400);
+      assert.equal(withoutReason.body.error.code, "ADMIN_CLOSE_REASON_REQUIRED");
+
+      const closed = await request("/api/v1/cash-register/close", {
+        method: "POST",
+        body: JSON.stringify({ efectivoContado: 20, observaciones: "Responsable no disponible" }),
+      }, login.body.data.token);
+      assert.equal(closed.status, 200);
+      assert.equal(closed.body.data.closedBy, overrideAdmin.id);
+
+      const audit = await dbClient.execute({
+        sql: `SELECT action, user_id FROM audit_logs
+              WHERE entity = 'cash_session' AND entity_id = ? AND action = 'CLOSE_ADMIN_OVERRIDE' LIMIT 1;`,
+        args: [String(overrideSessionId)],
+      });
+      assert.equal(audit.rows.length, 1);
+      assert.equal(audit.rows[0].user_id, overrideAdmin.id);
+    } finally {
+      if (overrideSessionId) {
+        await dbClient.execute({ sql: "DELETE FROM cash_sessions WHERE id = ?;", args: [overrideSessionId] });
+      }
+      await dbClient.execute({ sql: "DELETE FROM users WHERE id = ?;", args: [overrideAdmin.id] });
+    }
   });
 });

@@ -1,3 +1,4 @@
+import type { Client, Transaction } from "@libsql/client";
 import { dbClient } from "../db/client.js";
 import { PaymentMethod } from "../models/payment.model.js";
 import type { UtcRange } from "../utils/business-time.js";
@@ -69,6 +70,8 @@ export interface CashMovementTotalsRow {
   manualOutputCents: number;
 }
 
+type DbExecutor = Client | Transaction;
+
 function mapSession(row: Record<string, unknown>): CashSessionReportRow {
   return {
     id: Number(row.id),
@@ -88,16 +91,20 @@ function mapSession(row: Record<string, unknown>): CashSessionReportRow {
 }
 
 export class ReportRepository {
-  public async findCashSession(sessionId?: number): Promise<CashSessionReportRow | null> {
+  public async findCashSession(sessionId?: number, executor: DbExecutor = dbClient): Promise<CashSessionReportRow | null> {
     const result = sessionId
-      ? await dbClient.execute({ sql: "SELECT * FROM cash_sessions WHERE id = ? LIMIT 1;", args: [sessionId] })
-      : await dbClient.execute(
-          "SELECT * FROM cash_sessions ORDER BY is_closed ASC, id DESC LIMIT 1;"
-        );
+      ? await executor.execute({ sql: "SELECT * FROM cash_sessions WHERE id = ? LIMIT 1;", args: [sessionId] })
+      : await executor.execute({
+          sql: "SELECT * FROM cash_sessions ORDER BY is_closed ASC, id DESC LIMIT 1;",
+          args: [],
+        });
     return result.rows[0] ? mapSession(result.rows[0] as Record<string, unknown>) : null;
   }
 
-  public async getPayments(filters: Required<Pick<CashReportFilters, "sessionId">> & CashReportFilters): Promise<PaymentReconciliationRow[]> {
+  public async getPayments(
+    filters: Required<Pick<CashReportFilters, "sessionId">> & CashReportFilters,
+    executor: DbExecutor = dbClient
+  ): Promise<PaymentReconciliationRow[]> {
     const conditions = ["p.cash_session_id = ?"];
     const args: Array<string | number> = [filters.sessionId];
     if (filters.method) {
@@ -108,7 +115,7 @@ export class ReportRepository {
       conditions.push("p.received_by = ?");
       args.push(filters.userId);
     }
-    const result = await dbClient.execute({
+    const result = await executor.execute({
       sql: `SELECT p.id AS payment_id, p.payment_number, p.kind, p.status, p.amount_cents,
                    p.payment_method, p.payment_date, p.received_by, pu.full_name AS received_by_name,
                    p.cash_session_id AS payment_session_id,
@@ -145,7 +152,10 @@ export class ReportRepository {
     }));
   }
 
-  public async getAutomaticMovements(filters: Required<Pick<CashReportFilters, "sessionId">> & CashReportFilters): Promise<AutomaticMovementRow[]> {
+  public async getAutomaticMovements(
+    filters: Required<Pick<CashReportFilters, "sessionId">> & CashReportFilters,
+    executor: DbExecutor = dbClient
+  ): Promise<AutomaticMovementRow[]> {
     const conditions = ["cm.session_id = ?", "cm.source IN ('PAYMENT', 'REVERSAL')"];
     const args: Array<string | number> = [filters.sessionId];
     if (filters.method) {
@@ -156,7 +166,7 @@ export class ReportRepository {
       conditions.push("cm.created_by = ?");
       args.push(filters.userId);
     }
-    const result = await dbClient.execute({
+    const result = await executor.execute({
       sql: `SELECT cm.id AS movement_id, cm.payment_id, cm.tipo AS movement_type,
                    cm.metodo, ROUND(cm.monto * 100) AS amount_cents, cm.source,
                    cm.created_by, u.full_name AS created_by_name,
@@ -183,8 +193,8 @@ export class ReportRepository {
     }));
   }
 
-  public async getMovementTotals(sessionId: number): Promise<CashMovementTotalsRow> {
-    const result = await dbClient.execute({
+  public async getMovementTotals(sessionId: number, executor: DbExecutor = dbClient): Promise<CashMovementTotalsRow> {
+    const result = await executor.execute({
       sql: `SELECT
               COALESCE(SUM(CASE WHEN tipo = 'Ingreso' AND metodo = 'Efectivo' THEN ROUND(monto * 100) ELSE 0 END), 0) AS cash_income_cents,
               COALESCE(SUM(CASE WHEN tipo = 'Ingreso' AND metodo <> 'Efectivo' THEN ROUND(monto * 100) ELSE 0 END), 0) AS digital_income_cents,

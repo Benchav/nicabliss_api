@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { createApp } from "../../src/app.js";
 import { dbClient } from "../../src/db/client.js";
+import { JwtProvider } from "../../src/utils/jwt.js";
 
 describe("Cash reconciliation integration", () => {
   let server: http.Server;
@@ -28,12 +29,12 @@ describe("Cash reconciliation integration", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  async function request(path: string, options: RequestInit = {}) {
+  async function request(path: string, options: RequestInit = {}, requestToken = token) {
     const response = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}),
         ...(options.headers || {}),
       },
     });
@@ -47,6 +48,34 @@ describe("Cash reconciliation integration", () => {
     });
     assert.equal(opened.status, 201);
     sessionId = opened.body.data.id;
+    assert.equal(opened.body.data.openedBy, "usr_admin_001");
+    assert.equal(opened.body.data.responsable, "Administrador Nicabliss");
+
+    await dbClient.execute({
+      sql: `INSERT OR IGNORE INTO users (
+              id, username, email, password_hash, role, full_name, created_at, token_version
+            ) VALUES (?, ?, ?, ?, 'RECEPTIONIST', ?, ?, 0);`,
+      args: ["usr_cash_other_001", "cash_other", "cash.other@nicabliss.test", "unused", "Otro Cajero", new Date().toISOString()],
+    });
+    const otherUserToken = JwtProvider.sign({
+      sub: "usr_cash_other_001",
+      username: "cash_other",
+      role: "RECEPTIONIST",
+      version: 0,
+    });
+
+    const foreignMovement = await request("/api/v1/cash-register/movements", {
+      method: "POST",
+      body: JSON.stringify({
+        tipo: "Ingreso",
+        concepto: "Otro ingreso",
+        descripcion: "Intento de otro usuario",
+        metodo: "Efectivo",
+        monto: 5,
+      }),
+    }, otherUserToken);
+    assert.equal(foreignMovement.status, 403);
+    assert.equal(foreignMovement.body.error.code, "CASH_SESSION_OWNER_REQUIRED");
 
     const customer = await request("/api/v1/customers", {
       method: "POST",
@@ -70,6 +99,14 @@ describe("Cash reconciliation integration", () => {
     });
     assert.equal(reservation.status, 201);
 
+    const foreignPayment = await request(`/api/v1/reservations/${reservation.body.data.id}/payments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": "cash-reconciliation-other-user-001" },
+      body: JSON.stringify({ amount: 10, paymentMethod: "Efectivo" }),
+    }, otherUserToken);
+    assert.equal(foreignPayment.status, 403);
+    assert.equal(foreignPayment.body.error.code, "CASH_SESSION_OWNER_REQUIRED");
+
     const cashPayment = await request(`/api/v1/reservations/${reservation.body.data.id}/payments`, {
       method: "POST",
       headers: { "Idempotency-Key": "cash-reconciliation-cash-001" },
@@ -92,8 +129,39 @@ describe("Cash reconciliation integration", () => {
     assert.equal(reversal.status, 200);
     assert.equal(reversal.body.data.kind, "REVERSAL");
 
+    await dbClient.execute({
+      sql: `INSERT OR IGNORE INTO users (
+              id, username, email, password_hash, role, full_name, created_at, token_version
+            ) VALUES (?, ?, ?, ?, 'ADMIN', ?, ?, 0);`,
+      args: ["usr_cash_other_admin_001", "cash_other_admin", "cash.other.admin@nicabliss.test", "unused", "Otro Administrador", new Date().toISOString()],
+    });
+    const otherAdminToken = JwtProvider.sign({
+      sub: "usr_cash_other_admin_001",
+      username: "cash_other_admin",
+      role: "ADMIN",
+      version: 0,
+    });
+    try {
+      const foreignRetry = await request(`/api/v1/payments/${cardPayment.body.data.id}/void`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Reintento por otro administrador" }),
+      }, otherAdminToken);
+      assert.equal(foreignRetry.status, 403);
+      assert.equal(foreignRetry.body.error.code, "CASH_SESSION_OWNER_REQUIRED");
+    } finally {
+      await dbClient.execute({ sql: "DELETE FROM users WHERE id = ?;", args: ["usr_cash_other_admin_001"] });
+    }
+
+    const ownerRetry = await request(`/api/v1/payments/${cardPayment.body.data.id}/void`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "Reintento idempotente del responsable" }),
+    });
+    assert.equal(ownerRetry.status, 200);
+    assert.equal(ownerRetry.body.data.id, reversal.body.data.id);
+
     const manual = await request("/api/v1/cash-register/movements", {
       method: "POST",
+      headers: { "Idempotency-Key": "cash-reconciliation-manual-001" },
       body: JSON.stringify({
         tipo: "Ingreso",
         concepto: "Otro ingreso",
@@ -103,6 +171,28 @@ describe("Cash reconciliation integration", () => {
       }),
     });
     assert.equal(manual.status, 200);
+    const recordedManual = manual.body.data.movimientos.find(
+      (movement: { descripcion: string }) => movement.descripcion === "Ingreso manual de prueba"
+    );
+    assert.equal(recordedManual.createdBy, "usr_admin_001");
+    assert.equal(recordedManual.createdByName, "Administrador Nicabliss");
+
+    const manualRetry = await request("/api/v1/cash-register/movements", {
+      method: "POST",
+      headers: { "Idempotency-Key": "cash-reconciliation-manual-001" },
+      body: JSON.stringify({
+        tipo: "Ingreso",
+        concepto: "Otro ingreso",
+        descripcion: "Ingreso manual de prueba",
+        metodo: "Efectivo",
+        monto: 5,
+      }),
+    });
+    assert.equal(manualRetry.status, 200);
+    assert.equal(
+      manualRetry.body.data.movimientos.filter((movement: { descripcion: string }) => movement.descripcion === "Ingreso manual de prueba").length,
+      1
+    );
   });
 
   it("reconciles by session, payment method, and user", async () => {

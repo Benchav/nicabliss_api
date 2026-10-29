@@ -1,7 +1,6 @@
 import { TipoMovimiento, ConceptoMovimiento, MetodoPago } from "../models/cash.model.js";
 
 export interface OpenCashDto {
-  responsable: string;
   fondoInicial: number;
 }
 

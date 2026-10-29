@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    const [integrity, foreignKeys, migration, duplicates, admin, review, openCash] = await Promise.all([
+    const [integrity, foreignKeys, migration, duplicates, admin, review, openCash, unownedOpenCash] = await Promise.all([
       dbClient.execute("PRAGMA integrity_check;"),
       dbClient.execute("PRAGMA foreign_key_check;"),
       dbClient.execute({
@@ -42,6 +42,7 @@ async function main(): Promise<void> {
         "SELECT source_table, COUNT(DISTINCT source_id) AS count FROM legacy_migration_map WHERE status = 'REVIEW' GROUP BY source_table ORDER BY source_table;"
       ),
       dbClient.execute("SELECT COUNT(*) AS count FROM cash_sessions WHERE is_closed = 0;"),
+      dbClient.execute("SELECT COUNT(*) AS count FROM cash_sessions WHERE is_closed = 0 AND opened_by IS NULL;"),
     ]);
 
     const blockers: string[] = [...configurationBlockers];
@@ -61,6 +62,7 @@ async function main(): Promise<void> {
       foreignKeyViolations: foreignKeys.rows.length,
       duplicateCustomerDocuments: Number(duplicates.rows[0].count),
       openCashSessions: Number(openCash.rows[0].count),
+      unattributedOpenCashSessions: Number(unownedOpenCash.rows[0].count),
       legacyReview: review.rows.map((row) => ({
         sourceTable: String(row.source_table),
         count: Number(row.count),

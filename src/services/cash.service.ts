@@ -5,6 +5,8 @@ import { ReportRepository } from "../repositories/report.repository.js";
 import { ReportService } from "./report.service.js";
 import { config } from "../config/env.js";
 import { formatBusinessDateTime } from "../utils/business-time.js";
+import { dbClient } from "../db/client.js";
+import { centsToMoney, parseMoneyToCents } from "../utils/money.js";
 
 export class CashService {
   constructor(
@@ -16,20 +18,28 @@ export class CashService {
     return this.cashRepo.getCurrentSession();
   }
 
-  public async openSession(dto: OpenCashDto): Promise<CashSessionModel> {
+  public async openSession(
+    dto: OpenCashDto,
+    userId: string,
+    userFullName: string,
+    ipAddress?: string
+  ): Promise<CashSessionModel> {
     const current = await this.cashRepo.getCurrentSession();
     if (current && !current.isClosed) {
-      throw { statusCode: 409, code: "CONFLICT", message: `Ya existe un turno de caja abierto por ${current.responsable}` };
+      throw {
+        statusCode: 409,
+        code: "CASH_SESSION_ALREADY_OPEN",
+        message: `Ya existe un turno de caja abierto${current.responsable ? ` por ${current.responsable}` : ""}`,
+      };
     }
 
-    const fondo = Number(dto.fondoInicial) || 0;
-    if (fondo < 0) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El fondo inicial no puede ser negativo" };
-    }
+    const fondoCents = parseMoneyToCents(dto.fondoInicial, "fondoInicial");
+    const fondo = centsToMoney(fondoCents);
 
-    const session: CashSessionModel = {
-      id: Date.now(),
-      responsable: dto.responsable.trim(),
+    const session: Omit<CashSessionModel, "id" | "movimientos" | "openedBy"> & { openedBy: string } = {
+      responsable: userFullName.trim(),
+      openedBy: userId,
+      openedByName: userFullName.trim(),
       apertura: formatBusinessDateTime(new Date(), config.businessTimezone),
       fondoInicial: fondo,
       ingresosEfectivo: 0,
@@ -38,30 +48,42 @@ export class CashService {
       efectivoEsperado: fondo,
       observaciones: "",
       isClosed: false,
-      movimientos: [],
     };
 
-    await this.cashRepo.saveCurrentSession(session);
-    return session;
+    return this.cashRepo.openSession(session, ipAddress);
   }
 
-  public async addMovement(dto: AddMovementDto, userId?: string): Promise<CashSessionModel> {
+  public async addMovement(
+    dto: AddMovementDto,
+    userId: string,
+    ipAddress?: string,
+    idempotencyKey?: string
+  ): Promise<CashSessionModel> {
     const session = await this.cashRepo.getCurrentSession();
     if (!session || session.isClosed) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para registrar movimientos" };
+      throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "No hay una caja abierta para registrar movimientos" };
+    }
+    if (session.openedBy !== userId) {
+      throw {
+        statusCode: 403,
+        code: "CASH_SESSION_OWNER_REQUIRED",
+        message: `Solo ${session.responsable} puede registrar movimientos en esta caja`,
+      };
     }
 
-    const monto = Number(dto.monto);
-    if (monto <= 0) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El monto debe ser mayor que cero" };
+    const amountCents = parseMoneyToCents(dto.monto, "monto");
+    const monto = centsToMoney(amountCents);
+    if (amountCents <= 0) throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El monto debe ser mayor que cero" };
+    const requestKey = idempotencyKey?.trim() || undefined;
+    if (requestKey && requestKey.length > 200) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La clave de idempotencia no puede superar 200 caracteres" };
     }
 
     if (dto.tipo === "Salida" && dto.metodo === "Efectivo" && monto > session.efectivoEsperado) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: `La salida ($${monto}) supera el efectivo en caja ($${session.efectivoEsperado})` };
+      throw { statusCode: 409, code: "INSUFFICIENT_CASH", message: `La salida ($${monto}) supera el efectivo en caja ($${session.efectivoEsperado})` };
     }
 
-    const movimiento: CashMovementModel = {
-      id: Date.now(),
+    const movimiento: Omit<CashMovementModel, "id"> = {
       fecha: formatBusinessDateTime(new Date(), config.businessTimezone),
       tipo: dto.tipo,
       concepto: dto.concepto,
@@ -72,62 +94,71 @@ export class CashService {
       source: "MANUAL",
     };
 
-    session.movimientos.unshift(movimiento);
-
-    // Recalcular totales
-    session.ingresosEfectivo = session.movimientos
-      .filter(m => m.tipo === "Ingreso" && m.metodo === "Efectivo")
-      .reduce((sum, m) => sum + m.monto, 0);
-
-    session.ingresosDigitales = session.movimientos
-      .filter(m => m.tipo === "Ingreso" && m.metodo !== "Efectivo")
-      .reduce((sum, m) => sum + m.monto, 0);
-
-    session.salidasEfectivo = session.movimientos
-      .filter(m => m.tipo === "Salida" && m.metodo === "Efectivo")
-      .reduce((sum, m) => sum + m.monto, 0);
-
-    session.efectivoEsperado = Number((session.fondoInicial + session.ingresosEfectivo - session.salidasEfectivo).toFixed(2));
-
-    await this.cashRepo.saveCurrentSession(session);
-    return session;
+    return this.cashRepo.addManualMovement(session.id, movimiento, userId, ipAddress, requestKey);
   }
 
-  public async closeSession(dto: CloseCashDto, userId?: string, ipAddress?: string): Promise<CashSessionModel> {
-    const session = await this.cashRepo.getCurrentSession();
-    if (!session || session.isClosed) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "No hay un turno de caja abierto para cerrar" };
+  public async closeSession(
+    dto: CloseCashDto,
+    userId: string,
+    role: string,
+    ipAddress?: string
+  ): Promise<CashSessionModel> {
+    const transaction = await dbClient.transaction("write");
+    try {
+      const session = await this.cashRepo.getCurrentSession(transaction);
+      if (!session || session.isClosed) {
+        throw { statusCode: 409, code: "CASH_SESSION_REQUIRED", message: "No hay una caja abierta para cerrar" };
+      }
+
+      const adminOverride = session.openedBy !== userId;
+      if (adminOverride && role !== "ADMIN") {
+        throw {
+          statusCode: 403,
+          code: "CASH_SESSION_OWNER_REQUIRED",
+          message: `Solo ${session.responsable} o un administrador puede cerrar esta caja`,
+        };
+      }
+      if (adminOverride && !dto.observaciones?.trim()) {
+        throw {
+          statusCode: 400,
+          code: "ADMIN_CLOSE_REASON_REQUIRED",
+          message: "El cierre administrativo requiere indicar el motivo en las observaciones",
+        };
+      }
+
+      const contadoCents = parseMoneyToCents(dto.efectivoContado, "efectivoContado");
+      const reconciliation = await this.reportService.getCashReconciliation({ sessionId: session.id }, transaction);
+      if (!reconciliation.balanced) {
+        throw {
+          statusCode: 409,
+          code: "CASH_RECONCILIATION_MISMATCH",
+          message: "La caja no puede cerrarse porque existen descuadres entre pagos y movimientos automáticos",
+          details: {
+            difference: reconciliation.totals.difference,
+            mismatchCount: reconciliation.mismatchCount,
+            missingMovementCount: reconciliation.missingMovementCount,
+            orphanMovementCount: reconciliation.orphanMovementCount,
+            sessionIntegrity: reconciliation.sessionIntegrity,
+          },
+        };
+      }
+
+      session.efectivoContado = centsToMoney(contadoCents);
+      session.diferencia = centsToMoney(contadoCents - parseMoneyToCents(session.efectivoEsperado));
+      session.observaciones = dto.observaciones?.trim() || "";
+      session.cierre = formatBusinessDateTime(new Date(), config.businessTimezone);
+      session.closedBy = userId;
+      session.isClosed = true;
+
+      await this.cashRepo.closeWithAudit(session, userId, ipAddress, transaction, adminOverride);
+      await transaction.commit();
+      return (await this.cashRepo.getSessionById(session.id)) ?? session;
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
     }
-
-    const contado = Number(dto.efectivoContado);
-    if (isNaN(contado) || contado < 0) {
-      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El efectivo contado debe ser un número válido mayor o igual a 0" };
-    }
-
-    const reconciliation = await this.reportService.getCashReconciliation({ sessionId: session.id });
-    if (!reconciliation.balanced) {
-      throw {
-        statusCode: 409,
-        code: "CASH_RECONCILIATION_MISMATCH",
-        message: "La caja no puede cerrarse porque existen descuadres entre pagos y movimientos automáticos",
-        details: {
-          difference: reconciliation.totals.difference,
-          mismatchCount: reconciliation.mismatchCount,
-          missingMovementCount: reconciliation.missingMovementCount,
-          orphanMovementCount: reconciliation.orphanMovementCount,
-          sessionIntegrity: reconciliation.sessionIntegrity,
-        },
-      };
-    }
-
-    session.efectivoContado = contado;
-    session.diferencia = Number((contado - session.efectivoEsperado).toFixed(2));
-    session.observaciones = dto.observaciones?.trim() || "";
-    session.cierre = formatBusinessDateTime(new Date(), config.businessTimezone);
-    session.isClosed = true;
-
-    await this.cashRepo.closeWithAudit(session, userId, ipAddress);
-    return session;
   }
 
   public async getHistory(): Promise<CashSessionModel[]> {

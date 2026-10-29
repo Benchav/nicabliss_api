@@ -1,6 +1,8 @@
+import type { Client, Transaction } from "@libsql/client";
 import { PaymentMethod } from "../models/payment.model.js";
 import {
   AutomaticMovementRow,
+  CashMovementTotalsRow,
   CashReportFilters,
   PaymentReconciliationRow,
   ReportRepository,
@@ -89,6 +91,7 @@ export interface CashReconciliationReport {
 }
 
 const paymentMethods: PaymentMethod[] = ["Efectivo", "Tarjeta", "Transferencia"];
+type DbExecutor = Client | Transaction;
 
 function moneyToCents(value: number): number {
   return Math.round(value * 100);
@@ -105,17 +108,30 @@ function signedMovement(row: AutomaticMovementRow): number {
 export class ReportService {
   public constructor(private readonly repository: ReportRepository) {}
 
-  public async getCashReconciliation(input: CashReportFilters = {}): Promise<CashReconciliationReport> {
+  public async getCashReconciliation(
+    input: CashReportFilters = {},
+    executor?: DbExecutor
+  ): Promise<CashReconciliationReport> {
     const filters = this.validateFilters(input);
-    const session = await this.repository.findCashSession(filters.sessionId);
+    const session = await this.repository.findCashSession(filters.sessionId, executor);
     if (!session) throw { statusCode: 404, code: "CASH_SESSION_NOT_FOUND", message: "No existe una sesión de caja para conciliar" };
 
     const scopedFilters = { ...filters, sessionId: session.id };
-    const [payments, movements, movementTotals] = await Promise.all([
-      this.repository.getPayments(scopedFilters),
-      this.repository.getAutomaticMovements(scopedFilters),
-      this.repository.getMovementTotals(session.id),
-    ]);
+    let payments: PaymentReconciliationRow[];
+    let movements: AutomaticMovementRow[];
+    let movementTotals: CashMovementTotalsRow;
+    if (executor) {
+      // Keep transaction-backed reads sequential; a libSQL transaction is a single ordered stream.
+      payments = await this.repository.getPayments(scopedFilters, executor);
+      movements = await this.repository.getAutomaticMovements(scopedFilters, executor);
+      movementTotals = await this.repository.getMovementTotals(session.id, executor);
+    } else {
+      [payments, movements, movementTotals] = await Promise.all([
+        this.repository.getPayments(scopedFilters),
+        this.repository.getAutomaticMovements(scopedFilters),
+        this.repository.getMovementTotals(session.id),
+      ]);
+    }
 
     const items = payments.map((payment) => this.mapItem(payment, session.id));
     const paymentIds = new Set(payments.map((payment) => payment.paymentId));

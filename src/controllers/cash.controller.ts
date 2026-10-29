@@ -13,21 +13,31 @@ export class CashController {
 
   public openSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.cashService.openSession(req.body);
+      const data = await this.cashService.openSession(
+        req.body,
+        req.user!.sub,
+        req.user!.fullName || req.user!.username,
+        req.ip
+      );
       res.status(201).json({ success: true, data });
     } catch (err) { next(err); }
   };
 
   public addMovement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.cashService.addMovement(req.body, req.user!.sub);
+      const data = await this.cashService.addMovement(
+        req.body,
+        req.user!.sub,
+        req.ip,
+        req.header("Idempotency-Key")
+      );
       res.json({ success: true, data });
     } catch (err) { next(err); }
   };
 
   public closeSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const data = await this.cashService.closeSession(req.body, req.user!.sub, req.ip);
+      const data = await this.cashService.closeSession(req.body, req.user!.sub, req.user!.role, req.ip);
       res.json({ success: true, data });
     } catch (err) { next(err); }
   };
