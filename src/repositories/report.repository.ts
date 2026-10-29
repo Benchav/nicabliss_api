@@ -241,11 +241,20 @@ export class ReportRepository {
       ? [range.startUtc, range.endUtc, method]
       : [range.startUtc, range.endUtc];
     const categoryCondition = category
-      ? ` AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?`
+      ? " AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?"
       : "";
     const invoiceArgs: Array<string> = category
       ? [range.startUtc, range.endUtc, category]
       : [range.startUtc, range.endUtc];
+    const invoicedSql = category
+      ? `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
+         FROM invoice_items ii
+         JOIN invoices i ON i.id = ii.invoice_id
+         LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+         LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+         WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition};`
+      : `SELECT COALESCE(SUM(i.total_cents), 0) AS total_cents
+         FROM invoices i WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?;`;
 
     const [payments, methods, invoiced, advances, categories, activeCustomers, reservations, receivables, cash, recent] = await dbClient.batch([
       {
@@ -263,14 +272,8 @@ export class ReportRepository {
         args: paymentArgs,
       },
       {
-        sql: `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
-              FROM invoice_items ii
-              JOIN invoices i ON i.id = ii.invoice_id
-              LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
-              LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-               WHERE i.status <> 'Anulada'
-                 AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition};`,
-        args: invoiceArgs,
+        sql: invoicedSql,
+        args: category ? invoiceArgs : [range.startUtc, range.endUtc],
       },
       {
         sql: `SELECT COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents
@@ -282,13 +285,13 @@ export class ReportRepository {
       {
         sql: `SELECT CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
                      COALESCE(SUM(ii.total_cents), 0) AS total_cents
-              FROM invoice_items ii
-              JOIN invoices i ON i.id = ii.invoice_id
-              LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
-              LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-               WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?
-               GROUP BY category ORDER BY total_cents DESC;`,
-        args: [range.startUtc, range.endUtc],
+               FROM invoice_items ii
+               JOIN invoices i ON i.id = ii.invoice_id
+               LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+               LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+                WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition}
+                GROUP BY category ORDER BY total_cents DESC;`,
+        args: invoiceArgs,
       },
       {
         sql: `SELECT COUNT(DISTINCT customer_id) AS count FROM stays
@@ -403,7 +406,10 @@ export class ReportRepository {
     return result.rows;
   }
 
-  public async getRevenueCategories(range: UtcRange) {
+  public async getRevenueCategories(range: UtcRange, category?: string) {
+    const categoryCondition = category
+      ? " AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?"
+      : "";
     const result = await dbClient.execute({
       sql: `SELECT CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
                    COUNT(*) AS line_count, COALESCE(SUM(ii.total_cents), 0) AS total_cents
@@ -411,10 +417,193 @@ export class ReportRepository {
             JOIN invoices i ON i.id = ii.invoice_id
             LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
             LEFT JOIN service_catalog cat ON cat.id = sc.service_id
-             WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?
+             WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?${categoryCondition}
             GROUP BY category ORDER BY total_cents DESC;`,
-      args: [range.startUtc, range.endUtc],
+      args: category ? [range.startUtc, range.endUtc, category] : [range.startUtc, range.endUtc],
     });
     return result.rows;
+  }
+
+  public async getFinancialExportData(
+    range: UtcRange,
+    filters: { method?: PaymentMethod; category?: string },
+    businessFrom: string,
+    businessTo: string
+  ) {
+    const invoiceCategoryCondition = filters.category
+      ? " AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?"
+      : "";
+    const paymentMethodCondition = filters.method ? " AND p.payment_method = ?" : "";
+    const invoiceArgs: Array<string> = filters.category
+      ? [range.startUtc, range.endUtc, filters.category]
+      : [range.startUtc, range.endUtc];
+    const paymentArgs: Array<string> = filters.method
+      ? [range.startUtc, range.endUtc, filters.method]
+      : [range.startUtc, range.endUtc];
+    const movementArgs: Array<string> = [range.startUtc, range.endUtc, businessFrom, businessTo];
+    const invoiceTotalSql = filters.category
+      ? `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
+         FROM invoice_items ii
+         JOIN invoices i ON i.id = ii.invoice_id
+         LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+         LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+         WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?${invoiceCategoryCondition};`
+      : `SELECT COALESCE(SUM(i.total_cents), 0) AS total_cents
+         FROM invoices i
+         WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?;`;
+
+    const results = await dbClient.batch([
+      { sql: invoiceTotalSql, args: invoiceArgs },
+      {
+        sql: `SELECT
+                COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS collected_cents,
+                COALESCE(SUM(CASE WHEN i.issued_at IS NULL OR p.payment_date < i.issued_at
+                  THEN CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END ELSE 0 END), 0) AS advances_cents
+              FROM payments p LEFT JOIN invoices i ON i.id = p.invoice_id
+              WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition};`,
+        args: paymentArgs,
+      },
+      {
+        sql: `SELECT p.payment_method,
+                     COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents,
+                     COUNT(*) AS operation_count
+              FROM payments p
+              WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition}
+              GROUP BY p.payment_method ORDER BY p.payment_method;`,
+        args: paymentArgs,
+      },
+      {
+        sql: `SELECT CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
+                     COUNT(*) AS line_count, COALESCE(SUM(ii.total_cents), 0) AS total_cents
+              FROM invoice_items ii
+              JOIN invoices i ON i.id = ii.invoice_id
+              LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+              LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+              WHERE i.status <> 'Anulada' AND i.issued_at >= ? AND i.issued_at < ?${invoiceCategoryCondition}
+              GROUP BY category ORDER BY total_cents DESC;`,
+        args: invoiceArgs,
+      },
+      {
+        sql: `SELECT i.invoice_number, i.issued_at, i.status, i.subtotal_cents, i.tax_cents,
+                     i.discount_cents, i.total_cents, i.paid_amount_cents, i.balance_cents,
+                     c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     c.documento AS customer_document, r.codigo_reserva, r.habitacion,
+                     issuer.full_name AS issued_by_name
+              FROM invoices i
+              JOIN customers c ON c.id = i.customer_id
+              JOIN reservations r ON r.id = i.reservation_id
+              LEFT JOIN users issuer ON issuer.id = i.issued_by
+              WHERE i.issued_at >= ? AND i.issued_at < ?
+                AND (? IS NULL OR EXISTS (
+                  SELECT 1 FROM invoice_items ii
+                  LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+                  LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+                  WHERE ii.invoice_id = i.id
+                    AND (CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END) = ?
+                ))
+              ORDER BY i.issued_at, i.invoice_number;`,
+        args: [range.startUtc, range.endUtc, filters.category ?? null, filters.category ?? null],
+      },
+      {
+        sql: `SELECT i.invoice_number, i.issued_at, i.status, c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     r.codigo_reserva, CASE WHEN ii.service_type = 'LODGING' THEN 'Hospedaje' ELSE COALESCE(cat.categoria, 'Otro') END AS category,
+                     ii.service_type, ii.description, ii.quantity, ii.unit_price_cents, ii.subtotal_cents, ii.tax_cents, ii.total_cents
+              FROM invoice_items ii
+              JOIN invoices i ON i.id = ii.invoice_id
+              JOIN customers c ON c.id = i.customer_id
+              JOIN reservations r ON r.id = i.reservation_id
+              LEFT JOIN service_consumptions sc ON ii.service_type = 'SERVICE' AND sc.id = ii.source_id
+              LEFT JOIN service_catalog cat ON cat.id = sc.service_id
+              WHERE i.issued_at >= ? AND i.issued_at < ?${invoiceCategoryCondition}
+              ORDER BY i.issued_at, i.invoice_number, ii.id;`,
+        args: invoiceArgs,
+      },
+      {
+        sql: `SELECT p.payment_number, p.kind, p.status, p.payment_date, p.amount_cents,
+                     p.payment_method, p.reference, p.void_reason,
+                     original.payment_number AS reverses_payment_number,
+                     c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     c.documento AS customer_document, r.codigo_reserva, i.invoice_number,
+                     receiver.full_name AS received_by_name,
+                     CASE WHEN i.issued_at IS NULL OR p.payment_date < i.issued_at THEN 1 ELSE 0 END AS is_advance
+              FROM payments p
+              JOIN customers c ON c.id = p.customer_id
+              LEFT JOIN reservations r ON r.id = p.reservation_id
+              LEFT JOIN invoices i ON i.id = p.invoice_id
+              LEFT JOIN payments original ON original.id = p.reverses_payment_id
+              JOIN users receiver ON receiver.id = p.received_by
+              WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition}
+              ORDER BY p.payment_date, p.id;`,
+        args: paymentArgs,
+      },
+      {
+        sql: `SELECT i.invoice_number, i.issued_at, i.status, i.total_cents, i.paid_amount_cents, i.balance_cents,
+                     c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     c.documento AS customer_document, r.codigo_reserva, s.habitacion
+              FROM invoices i
+              JOIN customers c ON c.id = i.customer_id
+              JOIN reservations r ON r.id = i.reservation_id
+              JOIN stays s ON s.id = i.stay_id
+              WHERE i.status IN ('Emitida', 'Parcial') AND i.balance_cents > 0
+              ORDER BY i.issued_at, i.invoice_number;`,
+        args: [],
+      },
+      {
+        sql: `SELECT cm.id, cm.fecha, cm.tipo, cm.concepto, cm.descripcion, cm.metodo, ROUND(cm.monto * 100) AS amount_cents,
+                     cm.source, cm.payment_id, p.payment_number, cm.session_id,
+                     cs.responsable AS cash_responsible,
+                     c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     created_by.full_name AS created_by_name
+              FROM cash_movements cm
+              JOIN cash_sessions cs ON cs.id = cm.session_id
+              LEFT JOIN payments p ON p.id = cm.payment_id
+              LEFT JOIN customers c ON c.id = cm.customer_id
+              LEFT JOIN users created_by ON created_by.id = cm.created_by
+              WHERE (
+                (cm.source IN ('PAYMENT', 'REVERSAL') AND p.payment_date >= ? AND p.payment_date < ?)
+                OR (
+                  cm.source NOT IN ('PAYMENT', 'REVERSAL')
+                  AND CASE
+                    WHEN cm.fecha LIKE '__/__/____,%' THEN substr(cm.fecha, 7, 4) || '-' || substr(cm.fecha, 4, 2) || '-' || substr(cm.fecha, 1, 2)
+                    ELSE substr(cm.fecha, 1, 10)
+                  END BETWEEN ? AND ?
+                )
+              )
+              ORDER BY cm.fecha, cm.id;`,
+        args: movementArgs,
+      },
+      {
+        sql: `SELECT sc.consumed_at, sc.estado, sc.cantidad, sc.precio_unitario_cents, sc.subtotal_cents,
+                     sc.observaciones, sc.source_type, cat.categoria, cat.nombre AS service_name,
+                     c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
+                     r.codigo_reserva, s.habitacion, creator.full_name AS created_by_name
+              FROM service_consumptions sc
+              JOIN service_catalog cat ON cat.id = sc.service_id
+              JOIN customers c ON c.id = sc.customer_id
+              JOIN stays s ON s.id = sc.stay_id
+              JOIN reservations r ON r.id = s.reservation_id
+              JOIN users creator ON creator.id = sc.created_by
+              WHERE sc.consumed_at >= ? AND sc.consumed_at < ?
+                AND sc.estado IN ('Entregado', 'Consumido')${filters.category ? " AND cat.categoria = ?" : ""}
+              ORDER BY sc.consumed_at, sc.id;`,
+        args: filters.category
+          ? [range.startUtc, range.endUtc, filters.category]
+          : [range.startUtc, range.endUtc],
+      },
+    ], "read");
+
+    return {
+      invoicedCents: Number(results[0].rows[0]?.total_cents ?? 0),
+      collectedCents: Number(results[1].rows[0]?.collected_cents ?? 0),
+      advancesCents: Number(results[1].rows[0]?.advances_cents ?? 0),
+      byMethod: results[2].rows,
+      byCategory: results[3].rows,
+      invoices: results[4].rows,
+      invoiceLines: results[5].rows,
+      payments: results[6].rows,
+      receivables: results[7].rows,
+      cashMovements: results[8].rows,
+      services: results[9].rows,
+    };
   }
 }

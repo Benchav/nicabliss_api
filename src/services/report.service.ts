@@ -385,10 +385,11 @@ export class ReportService {
     };
   }
 
-  public async getRevenueCategories(from: string, to: string) {
+  public async getRevenueCategories(from: string, to: string, category?: string) {
     this.validateRange(from, to);
     const rows = await this.repository.getRevenueCategories(
-      businessDateRange(from, to, config.businessTimezone)
+      businessDateRange(from, to, config.businessTimezone),
+      category?.trim() || undefined
     );
     const items = rows.map((row) => ({
       category: String(row.category),
@@ -396,7 +397,7 @@ export class ReportService {
       invoiced: centsToMoney(Number(row.total_cents)),
     }));
     return {
-      from, to,
+      from, to, category: category?.trim() || undefined,
       total: Number(items.reduce((sum, item) => sum + item.invoiced, 0).toFixed(2)),
       items,
     };

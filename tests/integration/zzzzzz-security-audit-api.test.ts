@@ -71,6 +71,7 @@ describe("Security, RBAC, and audit integration", () => {
 
     const forbiddenRequests: Array<[string, RequestInit]> = [
       ["/api/v1/reports/dashboard?date=2026-10-24", {}],
+      ["/api/v1/reports/export.xlsx?period=daily&date=2026-10-24", {}],
       ["/api/v1/dashboard/metrics", {}],
       ["/api/v1/reports/receivables", {}],
       ["/api/v1/cash-register/current", {}],
