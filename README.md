@@ -81,11 +81,13 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 | Servicios | `/stays/:id/services`, `/service-catalog`, `/service-consumptions/:id/status`. |
 | Facturas | `/invoices`, `/:id/issue`, `/:id/payments`, `/:id/pdf`, `/:id/void`. |
 | Caja | `/cash-register/current`, `/open`, `/movements`, `/close`, `/history`. |
-| Reportes | `/reports/dashboard`, `/cash/*`, `/services`, `/revenue/monthly`, `/receivables`, `/revenue/categories`. |
+| Reportes | `/reports/dashboard`, `/reports/export.xlsx`, `/cash/*`, `/services`, `/revenue/monthly`, `/receivables`, `/revenue/categories`. |
 | Asistencia | `/attendance/check-in`, `/check-out`, `/today`, `/report`, `/absence`, `/schedules`. |
 | Administración heredada | `/legacy-administration/historical-accounts`, `/reviews`, `/reviews/:id/accept-unlinked` (ADMIN). |
 
 `/guests` y `/billing` se mantienen exclusivamente para consulta: cualquier escritura responde `405 LEGACY_READ_ONLY`. `/food-orders` y `/laundry` siguen operativos porque sincronizan explícitamente sus consumos con el modelo nuevo.
+
+`GET /api/v1/reports/export.xlsx` genera y descarga un libro Excel auténtico desde los datos canónicos de la base. Requiere rol `ADMIN` o `RECEPTIONIST` y acepta `period=daily&date=YYYY-MM-DD`, `period=weekly&date=YYYY-MM-DD` (semana lunes–domingo en la zona de negocio) o `period=monthly&month=YYYY-MM`. Los filtros opcionales `category` y `method` aplican a facturación/servicios y cobros/anticipos respectivamente. El libro separa facturas, líneas, pagos/reversiones, servicios, CxC vigente y movimientos operativos de Caja; estos últimos no se vuelven a contar como ingresos.
 
 ## Reglas financieras
 
