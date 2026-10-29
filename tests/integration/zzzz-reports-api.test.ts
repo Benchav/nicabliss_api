@@ -97,6 +97,14 @@ describe("Administrative reports integration", () => {
     const baselineTransfer = baselineDaily.byMethod.find((row: { method: string }) => row.method === "Transferencia");
     assert.equal(transfer.amount, baselineTransfer.amount + 40);
 
+    const filteredDaily = await request(`/api/v1/reports/dashboard?date=${today}&method=Transferencia`);
+    assert.equal(filteredDaily.status, 200);
+    const filteredTransfer = filteredDaily.body.data.byMethod.find((row: { method: string }) => row.method === "Transferencia");
+    assert.equal(filteredDaily.body.data.income.collected, filteredTransfer.amount);
+    assert.ok(filteredDaily.body.data.byMethod
+      .filter((row: { method: string }) => row.method !== "Transferencia")
+      .every((row: { amount: number; operationCount: number }) => row.amount === 0 && row.operationCount === 0));
+
     const services = await request(`/api/v1/reports/services?from=${today}&to=${today}&category=${encodeURIComponent("Alimentos")}`);
     assert.equal(services.status, 200);
     assert.ok(services.body.data.items.some((item: { serviceName: string; revenue: number }) => item.serviceName === "Pedido de alimentos" && item.revenue >= 10));

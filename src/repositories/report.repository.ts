@@ -258,9 +258,9 @@ export class ReportRepository {
         sql: `SELECT p.payment_method,
                      COALESCE(SUM(CASE WHEN p.kind = 'REVERSAL' THEN -p.amount_cents ELSE p.amount_cents END), 0) AS total_cents,
                      COUNT(*) AS operation_count
-               FROM payments p WHERE p.payment_date >= ? AND p.payment_date < ?
-               GROUP BY p.payment_method ORDER BY p.payment_method;`,
-        args: [range.startUtc, range.endUtc],
+               FROM payments p WHERE p.payment_date >= ? AND p.payment_date < ?${paymentMethodCondition}
+                GROUP BY p.payment_method ORDER BY p.payment_method;`,
+        args: paymentArgs,
       },
       {
         sql: `SELECT COALESCE(SUM(ii.total_cents), 0) AS total_cents
