@@ -1,5 +1,8 @@
+import type { Transaction } from "@libsql/client";
 import { dbClient } from "../db/client.js";
+import { EstadoPedido } from "../models/food-order.model.js";
 import { StayModel, StayStatus } from "../models/stay.model.js";
+import { toConsumptionStatus } from "../utils/food-order-status.js";
 
 const selectStay = `
   SELECT s.*, r.codigo_reserva,
@@ -41,6 +44,69 @@ export class StayRepository {
     return result.rows[0] ? mapStay(result.rows[0] as Record<string, unknown>) : null;
   }
 
+  public async findByReservationId(reservationId: number): Promise<StayModel | null> {
+    const result = await dbClient.execute({
+      sql: `${selectStay} WHERE s.reservation_id = ? LIMIT 1;`,
+      args: [reservationId],
+    });
+    return result.rows[0] ? mapStay(result.rows[0] as Record<string, unknown>) : null;
+  }
+
+  private async attachPreorders(
+    transaction: Transaction,
+    reservationId: number,
+    stayId: number,
+    userId: string,
+    now: string
+  ): Promise<void> {
+    const preorders = await transaction.execute({
+      sql: `SELECT fo.id, COALESCE(fo.customer_id, r.customer_id) AS customer_id,
+                   fo.productos, fo.total, fo.estado
+            FROM food_orders fo
+            JOIN reservations r ON r.id = fo.reservation_id
+            WHERE fo.reservation_id = ? AND fo.stay_id IS NULL AND fo.estado <> 'Cancelado'
+            ORDER BY fo.id;`,
+      args: [reservationId],
+    });
+
+    for (const order of preorders.rows) {
+      const existing = await transaction.execute({
+        sql: `SELECT id FROM service_consumptions
+              WHERE source_type = 'FOOD_ORDER' AND source_id = ? LIMIT 1;`,
+        args: [Number(order.id)],
+      });
+
+      let consumptionId = existing.rows[0] ? Number(existing.rows[0].id) : 0;
+      if (!consumptionId) {
+        const inserted = await transaction.execute({
+          sql: `INSERT INTO service_consumptions (
+                  stay_id, customer_id, service_id, cantidad, precio_unitario_cents, subtotal_cents,
+                  estado, observaciones, source_type, source_id, consumed_at, created_by, created_at, updated_at
+                ) VALUES (?, ?, 1, 1, ?, ?, ?, ?, 'FOOD_ORDER', ?, ?, ?, ?, ?);`,
+          args: [
+            stayId,
+            Number(order.customer_id),
+            Math.round(Number(order.total) * 100),
+            Math.round(Number(order.total) * 100),
+            toConsumptionStatus(String(order.estado) as EstadoPedido),
+            String(order.productos),
+            Number(order.id),
+            now,
+            userId,
+            now,
+            now,
+          ],
+        });
+        consumptionId = Number(inserted.lastInsertRowid);
+      }
+
+      await transaction.execute({
+        sql: `UPDATE food_orders SET stay_id = ?, service_consumption_id = ? WHERE id = ?;`,
+        args: [stayId, consumptionId, Number(order.id)],
+      });
+    }
+  }
+
   public async checkIn(reservationId: number, userId: string, ipAddress?: string): Promise<StayModel> {
     const transaction = await dbClient.transaction("write");
     let stayId = 0;
@@ -52,7 +118,8 @@ export class StayRepository {
       });
       if (existing.rows[0]) {
         stayId = Number(existing.rows[0].id);
-        await transaction.rollback();
+        await this.attachPreorders(transaction, reservationId, stayId, userId, now);
+        await transaction.commit();
         return (await this.findById(stayId))!;
       }
       const reservation = await transaction.execute({
@@ -79,6 +146,7 @@ export class StayRepository {
         args: [reservationId, row.customer_id, row.room_id, row.habitacion, now, userId, now, now],
       });
       stayId = Number(inserted.lastInsertRowid);
+      await this.attachPreorders(transaction, reservationId, stayId, userId, now);
       await transaction.execute({
         sql: "UPDATE reservations SET estado = 'CheckIn', updated_at = ? WHERE id = ?;",
         args: [now, reservationId],
@@ -91,6 +159,8 @@ export class StayRepository {
       await transaction.commit();
     } catch (error) {
       if (!transaction.closed) await transaction.rollback();
+      const concurrentStay = await this.findByReservationId(reservationId);
+      if (concurrentStay) return concurrentStay;
       throw error;
     } finally { transaction.close(); }
     return (await this.findById(stayId))!;
@@ -108,6 +178,18 @@ export class StayRepository {
       }
       if (stay.rows[0].estado !== "Activa") {
         throw { statusCode: 409, code: "INVALID_STATUS", message: "La estancia no puede finalizarse" };
+      }
+      const pendingServices = await transaction.execute({
+        sql: `SELECT COUNT(*) AS count FROM service_consumptions
+              WHERE stay_id = ? AND estado IN ('Registrado', 'EnProceso');`,
+        args: [stayId],
+      });
+      if (Number(pendingServices.rows[0].count) > 0) {
+        throw {
+          statusCode: 409,
+          code: "PENDING_SERVICES",
+          message: "La estancia tiene servicios pendientes de entregar o cancelar",
+        };
       }
       await transaction.execute({
         sql: "UPDATE stays SET estado = 'Finalizada', check_out_at = ?, updated_at = ? WHERE id = ?;",

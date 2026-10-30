@@ -109,19 +109,20 @@ export class InvoiceRepository {
       }
 
       const stay = await transaction.execute({
-        sql: `SELECT s.id, s.customer_id, s.reservation_id, r.codigo_reserva, r.total_reserva_cents
+        sql: `SELECT s.id, s.customer_id, s.reservation_id, s.estado AS stay_status,
+                     r.codigo_reserva, r.total_reserva_cents
               FROM stays s JOIN reservations r ON r.id = s.reservation_id
               WHERE s.id = ? LIMIT 1;`,
         args: [stayId],
       });
       if (!stay.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Estancia no encontrada" };
-      if (stay.rows[0].estado === "Cancelada") {
+      if (stay.rows[0].stay_status === "Cancelada") {
         throw { statusCode: 409, code: "INVALID_STATUS", message: "No se puede facturar una estancia cancelada" };
       }
 
       const services = await transaction.execute({
         sql: `SELECT sc.id, sc.cantidad, sc.precio_unitario_cents, sc.subtotal_cents,
-                     cat.nombre, cat.categoria
+                     sc.observaciones, cat.nombre, cat.categoria
               FROM service_consumptions sc
               JOIN service_catalog cat ON cat.id = sc.service_id
               WHERE sc.stay_id = ? AND sc.estado IN ('Entregado', 'Consumido')
@@ -159,8 +160,9 @@ export class InvoiceRepository {
                   invoice_id, service_type, source_id, description, quantity, unit_price_cents,
                   subtotal_cents, tax_cents, total_cents, created_at
                 ) VALUES (?, 'SERVICE', ?, ?, ?, ?, ?, 0, ?, ?);`,
-          args: [invoiceId, service.id, `${service.categoria} · ${service.nombre}`, service.cantidad,
-            service.precio_unitario_cents, service.subtotal_cents, service.subtotal_cents, now],
+          args: [invoiceId, service.id,
+            `${service.categoria} · ${service.nombre}${service.observaciones ? ` · ${service.observaciones}` : ""}`,
+            service.cantidad, service.precio_unitario_cents, service.subtotal_cents, service.subtotal_cents, now],
         });
       }
       await transaction.execute({
@@ -204,7 +206,7 @@ export class InvoiceRepository {
       });
       const services = await transaction.execute({
         sql: `SELECT sc.id, sc.cantidad, sc.precio_unitario_cents, sc.subtotal_cents,
-                     cat.nombre, cat.categoria
+                     sc.observaciones, cat.nombre, cat.categoria
               FROM service_consumptions sc
               JOIN service_catalog cat ON cat.id = sc.service_id
               WHERE sc.stay_id = ? AND sc.estado IN ('Entregado', 'Consumido')
@@ -230,8 +232,9 @@ export class InvoiceRepository {
                   invoice_id, service_type, source_id, description, quantity, unit_price_cents,
                   subtotal_cents, tax_cents, total_cents, created_at
                 ) VALUES (?, 'SERVICE', ?, ?, ?, ?, ?, 0, ?, ?);`,
-          args: [id, service.id, `${service.categoria} · ${service.nombre}`, service.cantidad,
-            service.precio_unitario_cents, service.subtotal_cents, service.subtotal_cents, now],
+          args: [id, service.id,
+            `${service.categoria} · ${service.nombre}${service.observaciones ? ` · ${service.observaciones}` : ""}`,
+            service.cantidad, service.precio_unitario_cents, service.subtotal_cents, service.subtotal_cents, now],
         });
       }
 

@@ -17,6 +17,18 @@ export class StayController {
       res.json({ success: true, data, message: "Estancia consultada" });
     } catch (error) { next(error); }
   };
+  public getAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getAccount(Number(req.params.id));
+      res.json({ success: true, data, message: "Cuenta de estancia consultada" });
+    } catch (error) { next(error); }
+  };
+  public getAccountByReservation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.getAccountByReservation(Number(req.params.id));
+      res.json({ success: true, data, message: "Cuenta de la reserva consultada" });
+    } catch (error) { next(error); }
+  };
   public checkIn = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await this.service.checkIn(Number(req.params.id), req.user!.sub, req.ip);

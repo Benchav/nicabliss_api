@@ -24,7 +24,7 @@ Configurar en la plataforma todas las variables de `.env.production.example`:
 
 ## Ventana de actualización
 
-La interfaz nueva omite el nombre del responsable y requiere la API con esquema `010`; por eso el backend debe quedar actualizado antes que el frontend. Como una versión antigua del backend no escribe `opened_by`, pausa y drena las escrituras de caja durante la migración y el cambio de backend. No ejecutes pruebas automatizadas contra la base remota.
+La interfaz nueva requiere la API con esquema `011`; por eso el backend debe quedar actualizado antes que el frontend. La migración `011` es aditiva y agrega la relación opcional entre pedidos de alimentos y reservas. No ejecutes pruebas automatizadas contra la base remota.
 
 Con la aplicación en mantenimiento y tras ensayar la migración sobre una copia independiente:
 
@@ -37,7 +37,7 @@ npm run db:verify
 npm run db:production:check
 ```
 
-Con `AUTO_MIGRATE=false`, `npm run db:migrate` es un paso explícito y obligatorio antes de desplegar la versión que requiere el esquema `010`. `db:backup` crea un respaldo local; conserva el archivo y su checksum fuera del equipo de despliegue. Luego despliega el backend, confirma `/ready` con `schemaVersion 010`, despliega el frontend y solo entonces reabre el tráfico. No ejecutar seeds contra producción.
+Con `AUTO_MIGRATE=false`, `npm run db:migrate` es un paso explícito y obligatorio antes de desplegar la versión que requiere el esquema `011`. `db:backup` crea un respaldo local; conserva el archivo y su checksum fuera del equipo de despliegue. Luego despliega el backend, confirma `/ready` con `schemaVersion 011`, despliega el frontend y solo entonces reabre el tráfico. No ejecutar seeds contra producción.
 
 La contraseña demo de `admin` hace fallar intencionalmente el último comando. Para rotarla, cargar temporalmente `ADMIN_NEW_PASSWORD` sin guardarla en Git y ejecutar:
 
@@ -51,7 +51,7 @@ Eliminar esas tres variables inmediatamente después. Comprobar:
 
 ```text
 GET https://<backend>/health  -> 200
-GET https://<backend>/ready   -> 200, schemaVersion 010
+GET https://<backend>/ready   -> 200, schemaVersion 011
 ```
 
 `db:production:check` informa si existe una sesión abierta sin responsable atribuible. La migración deja esos casos sin atribución inventada; un administrador debe revisar y, si corresponde, cerrarla indicando el motivo.

@@ -282,7 +282,7 @@ export class ReservationRepository {
 
   public async updateStatus(id: number, status: ReservationStatus, userId: string): Promise<ReservationModel> {
     const now = new Date().toISOString();
-    await dbClient.batch([
+    const statements = [
       {
         sql: "UPDATE reservations SET estado = ?, updated_at = ? WHERE id = ?;",
         args: [status, now, id],
@@ -292,7 +292,15 @@ export class ReservationRepository {
               VALUES (?, 'STATUS_CHANGE', 'reservation', ?, ?, ?);`,
         args: [userId, String(id), JSON.stringify({ estado: status }), now],
       },
-    ], "write");
+    ];
+    if (status === "Cancelada" || status === "NoShow") {
+      statements.push({
+        sql: `UPDATE food_orders SET estado = 'Cancelado'
+              WHERE reservation_id = ? AND stay_id IS NULL AND estado <> 'Cancelado';`,
+        args: [id],
+      });
+    }
+    await dbClient.batch(statements, "write");
     return (await this.findById(id))!;
   }
 }

@@ -1,13 +1,18 @@
 import { CreateCustomerDto, UpdateCustomerDto } from "../dtos/customer.dto.js";
 import { CustomerModel } from "../models/customer.model.js";
+import { CustomerHistoryModel } from "../models/customer-history.model.js";
 import { AuditRepository } from "../repositories/audit.repository.js";
 import { CustomerRepository, normalizeDocument } from "../repositories/customer.repository.js";
+import { StayAccountRepository } from "../repositories/stay-account.repository.js";
 import { AuditService } from "./audit.service.js";
 
 export class CustomerService {
   private readonly auditService = new AuditService(new AuditRepository());
 
-  public constructor(private readonly customerRepository: CustomerRepository) {}
+  public constructor(
+    private readonly customerRepository: CustomerRepository,
+    private readonly stayAccountRepository: StayAccountRepository = new StayAccountRepository()
+  ) {}
 
   public async getAll(search?: string): Promise<CustomerModel[]> {
     return this.customerRepository.findAll(search);
@@ -17,6 +22,25 @@ export class CustomerService {
     const customer = await this.customerRepository.findById(id);
     if (!customer) throw { statusCode: 404, code: "NOT_FOUND", message: "Cliente no encontrado" };
     return customer;
+  }
+
+  public async getHistory(id: number): Promise<CustomerHistoryModel> {
+    const customer = await this.getById(id);
+    const stays = await this.stayAccountRepository.findByCustomerId(id);
+    const activeStay = stays.find((stay) => stay.status === "Activa") ?? null;
+
+    return {
+      customer,
+      activeStay,
+      stays,
+      summary: {
+        stayCount: stays.length,
+        activeStayCount: stays.filter((stay) => stay.status === "Activa").length,
+        totalCharged: Number(stays.reduce((sum, stay) => sum + stay.total, 0).toFixed(2)),
+        totalPaid: Number(stays.reduce((sum, stay) => sum + stay.paid, 0).toFixed(2)),
+        outstandingBalance: Number(stays.reduce((sum, stay) => sum + stay.balance, 0).toFixed(2)),
+      },
+    };
   }
 
   public async create(dto: CreateCustomerDto, userId: string, ipAddress?: string): Promise<CustomerModel> {

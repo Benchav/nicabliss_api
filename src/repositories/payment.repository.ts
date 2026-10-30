@@ -137,12 +137,35 @@ export class PaymentRepository {
           throw { statusCode: 409, code: "INVALID_STATUS", message: "La factura no admite pagos en su estado actual" };
         }
         balanceCents = Number(invoice.rows[0].balance_cents);
+      } else if (String(reservationRow.estado) === "Finalizada") {
+        const stay = await transaction.execute({
+          sql: `SELECT s.id, r.total_reserva_cents,
+                       COALESCE((
+                         SELECT SUM(sc.subtotal_cents)
+                         FROM service_consumptions sc
+                         WHERE sc.stay_id = s.id AND sc.estado IN ('Entregado', 'Consumido')
+                       ), 0) AS services_cents
+                FROM stays s
+                JOIN reservations r ON r.id = s.reservation_id
+                WHERE s.reservation_id = ? LIMIT 1;`,
+          args: [record.reservationId],
+        });
+        if (!stay.rows[0]) {
+          throw {
+            statusCode: 409,
+            code: "STAY_NOT_FOUND",
+            message: "La reserva finalizada no tiene una estancia asociada para calcular el saldo",
+          };
+        }
+        const accountTotal = Number(stay.rows[0].total_reserva_cents) + Number(stay.rows[0].services_cents);
+        balanceCents = accountTotal - Number(reservationRow.paid_cents);
       } else {
         if (!["Pendiente", "Confirmada", "CheckIn"].includes(String(reservationRow.estado))) {
           throw { statusCode: 409, code: "INVALID_STATUS", message: "La reserva no admite pagos en su estado actual" };
         }
         balanceCents = Number(reservationRow.total_reserva_cents) - Number(reservationRow.paid_cents);
       }
+      balanceCents = Math.max(0, balanceCents);
       if (record.amountCents > balanceCents) {
         throw {
           statusCode: 400,

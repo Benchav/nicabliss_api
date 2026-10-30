@@ -1,3 +1,4 @@
+import type { Transaction } from "@libsql/client";
 import { dbClient } from "../db/client.js";
 import { ConsumptionStatus, ServiceCatalogModel, ServiceCategory, ServiceConsumptionModel } from "../models/service.model.js";
 import { centsToMoney } from "../utils/money.js";
@@ -68,6 +69,22 @@ export class ServiceRepository {
     return result.rows[0] ? mapConsumption(result.rows[0] as Record<string, unknown>) : null;
   }
 
+  private async assertNoIssuedInvoice(transaction: Transaction, stayId: number): Promise<void> {
+    const result = await transaction.execute({
+      sql: `SELECT 1 FROM invoices
+            WHERE stay_id = ? AND status IN ('Emitida', 'Parcial', 'Pagada')
+            LIMIT 1;`,
+      args: [stayId],
+    });
+    if (result.rows[0]) {
+      throw {
+        statusCode: 409,
+        code: "INVOICE_ISSUED",
+        message: "La estancia tiene una factura emitida; anúlala antes de modificar sus cargos",
+      };
+    }
+  }
+
   public async createConsumption(input: {
     stayId: number; serviceId: number; quantity: number; unitPriceCents: number;
     status: ConsumptionStatus; observations?: string; userId: string; now: string;
@@ -78,6 +95,7 @@ export class ServiceRepository {
       const stay = await transaction.execute({ sql: "SELECT customer_id, estado FROM stays WHERE id = ? LIMIT 1;", args: [input.stayId] });
       if (!stay.rows[0]) throw { statusCode: 404, code: "NOT_FOUND", message: "Estancia no encontrada" };
       if (stay.rows[0].estado !== "Activa") throw { statusCode: 409, code: "STAY_NOT_ACTIVE", message: "La estancia no está activa" };
+      await this.assertNoIssuedInvoice(transaction, input.stayId);
       const catalog = await transaction.execute({ sql: "SELECT id, activo FROM service_catalog WHERE id = ? LIMIT 1;", args: [input.serviceId] });
       if (!catalog.rows[0] || Number(catalog.rows[0].activo) !== 1) throw { statusCode: 404, code: "NOT_FOUND", message: "Servicio no disponible" };
       const inserted = await transaction.execute({
@@ -107,12 +125,13 @@ export class ServiceRepository {
     const transaction = await dbClient.transaction("write");
     try {
       const current = await transaction.execute({
-        sql: "SELECT estado, source_type, source_id FROM service_consumptions WHERE id = ? LIMIT 1;",
+        sql: "SELECT estado, stay_id, source_type, source_id FROM service_consumptions WHERE id = ? LIMIT 1;",
         args: [id],
       });
       if (!current.rows[0]) {
         throw { statusCode: 404, code: "NOT_FOUND", message: "Consumo no encontrado" };
       }
+      await this.assertNoIssuedInvoice(transaction, Number(current.rows[0].stay_id));
 
       await transaction.execute({
         sql: "UPDATE service_consumptions SET estado = ?, updated_at = ? WHERE id = ?;",

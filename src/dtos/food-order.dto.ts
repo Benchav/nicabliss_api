@@ -2,6 +2,7 @@ import { EstadoPedido } from "../models/food-order.model.js";
 
 export interface CreateFoodOrderDto {
   stayId?: number;
+  reservationId?: number;
   huesped?: string;
   habitacion?: string;
   productos: string;

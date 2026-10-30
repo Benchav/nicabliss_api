@@ -31,6 +31,7 @@ reservationRouter.post("/", validateBody(createReservationSchema), reservationCo
 reservationRouter.post("/:id/check-in", stayController.checkIn);
 reservationRouter.get("/:id/payments", paymentController.getForReservation);
 reservationRouter.post("/:id/payments", validateBody(createPaymentSchema), paymentController.createForReservation);
+reservationRouter.get("/:id/account", stayController.getAccountByReservation);
 reservationRouter.get("/:id", reservationController.getById);
 reservationRouter.put("/:id", validateBody(updateReservationSchema), reservationController.update);
 reservationRouter.patch("/:id/status", validateBody(updateReservationStatusSchema), reservationController.updateStatus);
