@@ -39,8 +39,9 @@ export class LaundryService {
     const totalPrendas = dto.prendas.reduce((sum, p) => sum + (Number(p.cantidad) || 0), 0);
     const total = Number((totalPrendas * LaundryService.PRECIO_POR_PRENDA).toFixed(2));
 
-    const newOrder: LaundryModel = {
-      id: Date.now(),
+    if (stay && !userId) throw { statusCode: 401, code: "UNAUTHORIZED", message: "Usuario no autenticado" };
+
+    const newOrder: Omit<LaundryModel, "id"> = {
       huesped: stay?.customerName || dto.huesped!.trim(),
       habitacion: stay?.habitacion || dto.habitacion!.trim(),
       prendas: dto.prendas,
@@ -54,9 +55,7 @@ export class LaundryService {
       createdBy: stay ? userId : undefined,
     };
 
-    if (stay && !userId) throw { statusCode: 401, code: "UNAUTHORIZED", message: "Usuario no autenticado" };
-    await this.laundryRepo.saveWithConsumption(newOrder);
-    return newOrder;
+    return this.laundryRepo.create(newOrder);
   }
 
   public async update(id: number, dto: UpdateLaundryOrderDto): Promise<LaundryModel> {
@@ -78,14 +77,14 @@ export class LaundryService {
     if (dto.estado !== undefined) order.estado = dto.estado;
 
     await this.laundryRepo.save(order);
-    return order;
+    return (await this.getById(id));
   }
 
   public async updateStatus(id: number, dto: UpdateLaundryStatusDto): Promise<LaundryModel> {
     const order = await this.getById(id);
     order.estado = dto.estado;
     await this.laundryRepo.save(order);
-    return order;
+    return (await this.getById(id));
   }
 
   public async delete(id: number): Promise<void> {

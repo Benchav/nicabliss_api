@@ -21,6 +21,7 @@ export const stayRouter = Router();
 stayRouter.use(authMiddleware, requireRole("ADMIN", "RECEPTIONIST", "STAFF"));
 stayRouter.get("/", stayController.getAll);
 stayRouter.get("/:id/services", serviceController.getByStay);
+stayRouter.get("/:id/account", stayController.getAccount);
 stayRouter.post("/:id/services", validateBody(createConsumptionSchema), serviceController.createConsumption);
 stayRouter.post("/:id/check-out", requireRole("ADMIN", "RECEPTIONIST"), stayController.checkOut);
 stayRouter.get("/:id", stayController.getById);

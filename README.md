@@ -73,11 +73,11 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 | --- | --- |
 | Autenticación | `POST /auth/login`, `GET /auth/me`, `POST /auth/register` (ADMIN). |
 | Usuarios | CRUD en `/users` (ADMIN). |
-| Clientes | `GET/POST /customers`, `GET/PUT /customers/:id`. |
+| Clientes | `GET/POST /customers`, `GET/PUT /customers/:id`, `GET /customers/:id/history`. |
 | Habitaciones | `GET /rooms`, `GET /rooms/availability?from=&to=`. |
-| Reservas | CRUD operativo en `/reservations`; `POST /reservations/:id/check-in`. |
+| Reservas | CRUD operativo en `/reservations`; `POST /reservations/:id/check-in`; `GET /reservations/:id/account`. |
 | Pagos | `GET/POST /reservations/:id/payments`, `GET /payments/:id/receipt`, `POST /payments/:id/void`. |
-| Estancias | `GET /stays`, `GET /stays/:id`, `POST /stays/:id/check-out`. |
+| Estancias | `GET /stays`, `GET /stays/:id`, `GET /stays/:id/account`, `POST /stays/:id/check-out`. |
 | Servicios | `/stays/:id/services`, `/service-catalog`, `/service-consumptions/:id/status`. |
 | Facturas | `/invoices`, `/:id/issue`, `/:id/payments`, `/:id/pdf`, `/:id/void`. |
 | Caja | `/cash-register/current`, `/open`, `/movements`, `/close`, `/history`. |
@@ -85,7 +85,7 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 | Asistencia | `/attendance/check-in`, `/check-out`, `/today`, `/report`, `/absence`, `/schedules`. |
 | Administración heredada | `/legacy-administration/historical-accounts`, `/reviews`, `/reviews/:id/accept-unlinked` (ADMIN). |
 
-`/guests` y `/billing` se mantienen exclusivamente para consulta: cualquier escritura responde `405 LEGACY_READ_ONLY`. `/food-orders` y `/laundry` siguen operativos porque sincronizan explícitamente sus consumos con el modelo nuevo.
+`/guests` y `/billing` se mantienen exclusivamente para consulta: cualquier escritura responde `405 LEGACY_READ_ONLY`. `/food-orders` y `/laundry` siguen operativos porque sincronizan explícitamente sus consumos con el modelo nuevo. Un pedido de alimentos puede crearse para una estancia activa o para una reserva `Confirmada`; en este último caso queda preparado y se carga a la cuenta una sola vez al registrar el check-in. Si la reserva se cancela o marca como `NoShow`, el pedido previo se cancela y no se cobra. Los estados del pedido siguen transiciones controladas y un pedido ya incluido en una factura emitida queda bloqueado para cambios de estado, productos o importe.
 
 `GET /api/v1/reports/export.xlsx` genera y descarga un libro Excel auténtico desde los datos canónicos de la base. Requiere rol `ADMIN` o `RECEPTIONIST` y acepta `period=daily&date=YYYY-MM-DD`, `period=weekly&date=YYYY-MM-DD` (semana lunes–domingo en la zona de negocio) o `period=monthly&month=YYYY-MM`. Los filtros opcionales `category` y `method` aplican a facturación/servicios y cobros/anticipos respectivamente. El libro separa facturas, líneas, pagos/reversiones, servicios, CxC vigente y movimientos operativos de Caja; estos últimos no se vuelven a contar como ingresos.
 
@@ -96,7 +96,11 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 - Todo pago o reversión exige una caja abierta.
 - Los pagos publicados son inmutables; una anulación crea una reversión.
 - Una factura emitida congela líneas y precios.
-- Solo los servicios `Entregado` o `Consumido` entran en la factura.
+- Solo los servicios `Entregado` o `Consumido` entran en la factura y en el total de la cuenta de estancia.
+- Un servicio `Registrado` o `EnProceso` bloquea el check-out hasta ser entregado o cancelado.
+- El check-out puede finalizar con saldo pendiente; el saldo se conserva visible en la estancia y en el historial del cliente.
+- Después del check-out, el saldo pendiente puede cobrarse desde la reserva o la factura activa; cada pago queda asociado al historial del cliente.
+- Una factura emitida congela los cargos de la estancia: no admite nuevos servicios, alimentos o lavandería, ni cambios de estado, productos o importe hasta que sea anulada.
 - La caja no cierra si la conciliación automática presenta descuadres.
 - El PDF muestra `COMPROBANTE INTERNO · NO ES FACTURA FISCAL`.
 
@@ -123,7 +127,7 @@ El middleware consulta el usuario vigente en la base en cada solicitud. Cambiar 
 
 ## Migraciones y datos heredados
 
-Las migraciones `001` a `010` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas. `008` garantiza en la base la unicidad del documento normalizado de clientes, `009` añade revocación de sesiones, resolución auditada de revisiones y rate limiting compartido para login, y `010` atribuye sesiones de caja a usuarios, conserva las sesiones históricas sin autoría fiable e incorpora idempotencia para movimientos manuales.
+Las migraciones `001` a `011` son aditivas, versionadas, transaccionales y verificadas por checksum. No se eliminan tablas heredadas. `008` garantiza en la base la unicidad del documento normalizado de clientes, `009` añade revocación de sesiones, resolución auditada de revisiones y rate limiting compartido para login, `010` atribuye sesiones de caja a usuarios, conserva las sesiones históricas sin autoría fiable e incorpora idempotencia para movimientos manuales, y `011` permite preparar pedidos de alimentos para una reserva antes del check-in.
 
 La migración progresiva:
 
@@ -144,7 +148,7 @@ npm run db:verify
 npm run db:legacy:preview
 ```
 
-Antes de cualquier operación remota, seguir [docs/turso-backup-rehearsal.md](docs/turso-backup-rehearsal.md). No ejecutar migraciones ni la conversión heredada en producción sin respaldo verificado y ensayo completo sobre una copia.
+Antes de cualquier operación remota, seguir [docs/turso-backup-rehearsal.md](docs/turso-backup-rehearsal.md). Para el despliegue de esta versión, seguir [docs/migration-guide-011.md](docs/migration-guide-011.md). No ejecutar migraciones ni la conversión heredada en producción sin respaldo verificado y ensayo completo sobre una copia.
 
 ## Configuración de producción
 

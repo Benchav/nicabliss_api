@@ -4,6 +4,12 @@ import { FoodOrderService } from "../services/food-order.service.js";
 import { FoodOrderRepository } from "../repositories/food-order.repository.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { requireRole } from "../middlewares/role.middleware.js";
+import { validateBody } from "../middlewares/validate.middleware.js";
+import {
+  createFoodOrderSchema,
+  updateFoodOrderSchema,
+  updateFoodOrderStatusSchema,
+} from "../validators/food-order.validator.js";
 
 export const foodOrderRepository = new FoodOrderRepository();
 export const foodOrderService = new FoodOrderService(foodOrderRepository);
@@ -14,7 +20,7 @@ foodOrderRouter.use(authMiddleware);
 foodOrderRouter.use(requireRole("ADMIN", "RECEPTIONIST", "STAFF"));
 foodOrderRouter.get("/", foodOrderController.getAll);
 foodOrderRouter.get("/:id", foodOrderController.getById);
-foodOrderRouter.post("/", foodOrderController.create);
-foodOrderRouter.put("/:id", foodOrderController.update);
-foodOrderRouter.patch("/:id/status", foodOrderController.updateStatus);
+foodOrderRouter.post("/", validateBody(createFoodOrderSchema), foodOrderController.create);
+foodOrderRouter.put("/:id", validateBody(updateFoodOrderSchema), foodOrderController.update);
+foodOrderRouter.patch("/:id/status", validateBody(updateFoodOrderStatusSchema), foodOrderController.updateStatus);
 foodOrderRouter.delete("/:id", foodOrderController.delete);

@@ -48,6 +48,13 @@ describe("FoodOrderService Unit Tests", () => {
     assert.equal(updated.total, 15);
   });
 
+  it("debe rechazar una transición inválida desde un pedido entregado", async () => {
+    await assert.rejects(
+      async () => await orderService.updateStatus(101, { estado: "Pendiente" }),
+      (err: any) => err.statusCode === 409 && err.code === "INVALID_STATUS_TRANSITION"
+    );
+  });
+
   it("debe eliminar una comanda de alimentos existente (DELETE)", async () => {
     const orden = await orderService.create({
       huesped: "Para Cancelar",

@@ -18,6 +18,13 @@ export class CustomerController {
     } catch (error) { next(error); }
   };
 
+  public getHistory = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.customerService.getHistory(Number(req.params.id));
+      res.json({ success: true, data, message: "Historial del cliente consultado" });
+    } catch (error) { next(error); }
+  };
+
   public create = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const data = await this.customerService.create(req.body, req.user!.sub, req.ip);

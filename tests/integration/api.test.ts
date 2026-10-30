@@ -2,6 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { createApp } from "../../src/app.js";
+import { REQUIRED_SCHEMA_VERSION } from "../../src/db/schema.js";
 
 describe("API Integration & Security Tests (E2E)", () => {
   let server: http.Server;
@@ -44,7 +45,7 @@ describe("API Integration & Security Tests (E2E)", () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.status, "ready");
     assert.equal(res.body.database, "connected");
-    assert.equal(res.body.schemaVersion, "010");
+    assert.equal(res.body.schemaVersion, REQUIRED_SCHEMA_VERSION);
   });
 
   it("POST /api/v1/auth/login -> autentica con credenciales admin y emite JWT", async () => {

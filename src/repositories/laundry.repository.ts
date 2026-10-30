@@ -1,4 +1,6 @@
+import type { Transaction } from "@libsql/client";
 import { LaundryModel, EstadoLavanderia, PrendaItem } from "../models/laundry.model.js";
+import { ConsumptionStatus } from "../models/service.model.js";
 import { dbClient } from "../db/client.js";
 
 function mapRowToLaundry(row: any): LaundryModel {
@@ -24,6 +26,13 @@ function mapRowToLaundry(row: any): LaundryModel {
     serviceConsumptionId: row.service_consumption_id ? Number(row.service_consumption_id) : undefined,
     createdBy: row.created_by ? String(row.created_by) : undefined,
   };
+}
+
+function toConsumptionStatus(estado: EstadoLavanderia): ConsumptionStatus {
+  if (estado === "Cancelado") return "Cancelado";
+  if (estado === "Pendiente") return "Registrado";
+  if (estado === "En proceso") return "EnProceso";
+  return "Entregado";
 }
 
 export class LaundryRepository {
@@ -54,29 +63,111 @@ export class LaundryRepository {
     return mapRowToLaundry(result.rows[0]);
   }
 
+  private async assertNoIssuedInvoice(transaction: Transaction, stayId: number): Promise<void> {
+    const result = await transaction.execute({
+      sql: `SELECT 1 FROM invoices
+            WHERE stay_id = ? AND status IN ('Emitida', 'Parcial', 'Pagada')
+            LIMIT 1;`,
+      args: [stayId],
+    });
+    if (result.rows[0]) {
+      throw {
+        statusCode: 409,
+        code: "INVOICE_ISSUED",
+        message: "La estancia tiene una factura emitida; anúlala antes de modificar sus cargos",
+      };
+    }
+  }
+
+  public async create(order: Omit<LaundryModel, "id">): Promise<LaundryModel> {
+    const transaction = await dbClient.transaction("write");
+    const now = new Date().toISOString();
+    let orderId = 0;
+    try {
+      let customerId = order.customerId;
+      if (order.stayId) {
+        const stay = await transaction.execute({
+          sql: "SELECT customer_id, estado FROM stays WHERE id = ? LIMIT 1;",
+          args: [order.stayId],
+        });
+        if (!stay.rows[0]) {
+          throw { statusCode: 404, code: "NOT_FOUND", message: "Estancia no encontrada" };
+        }
+        if (String(stay.rows[0].estado) !== "Activa") {
+          throw { statusCode: 409, code: "STAY_NOT_ACTIVE", message: "La estancia no está activa" };
+        }
+        customerId = Number(stay.rows[0].customer_id);
+        await this.assertNoIssuedInvoice(transaction, order.stayId);
+      }
+
+      const inserted = await transaction.execute({
+        sql: `INSERT INTO laundry_orders (
+                huesped, habitacion, prendas, total_prendas, total, estado, fecha,
+                observaciones, customer_id, stay_id, created_by
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        args: [
+          order.huesped,
+          order.habitacion,
+          JSON.stringify(order.prendas),
+          order.totalPrendas,
+          order.total,
+          order.estado,
+          order.fecha,
+          order.observaciones,
+          customerId ?? null,
+          order.stayId ?? null,
+          order.createdBy ?? null,
+        ],
+      });
+      orderId = Number(inserted.lastInsertRowid);
+
+      if (order.stayId && customerId && order.createdBy) {
+        const consumption = await transaction.execute({
+          sql: `INSERT INTO service_consumptions (
+                  stay_id, customer_id, service_id, cantidad, precio_unitario_cents, subtotal_cents,
+                  estado, observaciones, source_type, source_id, consumed_at, created_by, created_at, updated_at
+                ) VALUES (?, ?, 2, ?, 50, ?, ?, ?, 'LAUNDRY_ORDER', ?, ?, ?, ?, ?);`,
+          args: [
+            order.stayId,
+            customerId,
+            order.totalPrendas,
+            Math.round(order.total * 100),
+            toConsumptionStatus(order.estado),
+            order.observaciones,
+            orderId,
+            now,
+            order.createdBy,
+            now,
+            now,
+          ],
+        });
+        const consumptionId = Number(consumption.lastInsertRowid);
+        await transaction.execute({
+          sql: "UPDATE laundry_orders SET service_consumption_id = ? WHERE id = ?;",
+          args: [consumptionId, orderId],
+        });
+      }
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
+    }
+    return (await this.findById(orderId))!;
+  }
+
   public async save(order: LaundryModel): Promise<void> {
     const prendasJson = JSON.stringify(order.prendas || []);
     const transaction = await dbClient.transaction("write");
     try {
-      await transaction.execute({
-        sql: `INSERT INTO laundry_orders (id, huesped, habitacion, prendas, total_prendas, total, estado, fecha, observaciones,
-                customer_id, stay_id, service_consumption_id, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(id) DO UPDATE SET
-                huesped = excluded.huesped,
-                habitacion = excluded.habitacion,
-                prendas = excluded.prendas,
-                total_prendas = excluded.total_prendas,
-                total = excluded.total,
-                estado = excluded.estado,
-                fecha = excluded.fecha,
-                observaciones = excluded.observaciones,
-                customer_id = excluded.customer_id,
-                stay_id = excluded.stay_id,
-                service_consumption_id = excluded.service_consumption_id,
-                created_by = excluded.created_by;`,
+      if (order.stayId) await this.assertNoIssuedInvoice(transaction, order.stayId);
+      const updated = await transaction.execute({
+        sql: `UPDATE laundry_orders SET
+                huesped = ?, habitacion = ?, prendas = ?, total_prendas = ?, total = ?, estado = ?, fecha = ?,
+                observaciones = ?, customer_id = ?, stay_id = ?, service_consumption_id = ?, created_by = ?
+              WHERE id = ?;`,
         args: [
-          order.id,
           order.huesped,
           order.habitacion,
           prendasJson,
@@ -89,17 +180,25 @@ export class LaundryRepository {
           order.stayId ?? null,
           order.serviceConsumptionId ?? null,
           order.createdBy ?? null,
+          order.id,
         ],
       });
+      if (updated.rowsAffected === 0) {
+        throw { statusCode: 404, code: "NOT_FOUND", message: "Solicitud de lavandería no encontrada" };
+      }
 
       if (order.serviceConsumptionId) {
-        const status = order.estado === "Cancelado" ? "Cancelado"
-          : order.estado === "Pendiente" ? "Registrado"
-            : order.estado === "En proceso" ? "EnProceso" : "Entregado";
         await transaction.execute({
           sql: `UPDATE service_consumptions SET estado = ?, cantidad = ?, precio_unitario_cents = 50,
                   subtotal_cents = ?, observaciones = ?, updated_at = ? WHERE id = ?;`,
-          args: [status, order.totalPrendas, Math.round(order.total * 100), order.observaciones, new Date().toISOString(), order.serviceConsumptionId],
+          args: [
+            toConsumptionStatus(order.estado),
+            order.totalPrendas,
+            Math.round(order.total * 100),
+            order.observaciones,
+            new Date().toISOString(),
+            order.serviceConsumptionId,
+          ],
         });
       }
       await transaction.commit();
@@ -109,36 +208,6 @@ export class LaundryRepository {
     } finally {
       transaction.close();
     }
-  }
-
-  public async saveWithConsumption(order: LaundryModel): Promise<void> {
-    if (!order.stayId || !order.customerId || !order.createdBy) {
-      await this.save(order);
-      return;
-    }
-    const transaction = await dbClient.transaction("write");
-    const now = new Date().toISOString();
-    try {
-      await transaction.execute({
-        sql: `INSERT INTO laundry_orders (id, huesped, habitacion, prendas, total_prendas, total, estado, fecha,
-                observaciones, customer_id, stay_id, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        args: [order.id, order.huesped, order.habitacion, JSON.stringify(order.prendas), order.totalPrendas,
-          order.total, order.estado, order.fecha, order.observaciones, order.customerId, order.stayId, order.createdBy],
-      });
-      const consumption = await transaction.execute({
-        sql: `INSERT INTO service_consumptions (
-                stay_id, customer_id, service_id, cantidad, precio_unitario_cents, subtotal_cents,
-                estado, observaciones, source_type, source_id, consumed_at, created_by, created_at, updated_at
-              ) VALUES (?, ?, 2, ?, 50, ?, 'Registrado', ?, 'LAUNDRY_ORDER', ?, ?, ?, ?, ?);`,
-        args: [order.stayId, order.customerId, order.totalPrendas, Math.round(order.total * 100), order.observaciones,
-          order.id, now, order.createdBy, now, now],
-      });
-      order.serviceConsumptionId = Number(consumption.lastInsertRowid);
-      await transaction.execute({ sql: "UPDATE laundry_orders SET service_consumption_id = ? WHERE id = ?;", args: [order.serviceConsumptionId, order.id] });
-      await transaction.commit();
-    } catch (error) { await transaction.rollback(); throw error; }
-    finally { transaction.close(); }
   }
 
   public async countPending(): Promise<number> {

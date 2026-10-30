@@ -15,5 +15,6 @@ export const customerRouter = Router();
 customerRouter.use(authMiddleware, requireRole("ADMIN", "RECEPTIONIST"));
 customerRouter.get("/", controller.getAll);
 customerRouter.post("/", validateBody(createCustomerSchema), controller.create);
+customerRouter.get("/:id/history", controller.getHistory);
 customerRouter.get("/:id", controller.getById);
 customerRouter.put("/:id", validateBody(updateCustomerSchema), controller.update);
