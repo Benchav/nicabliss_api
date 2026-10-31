@@ -13,6 +13,7 @@ function mapRoom(row: Record<string, unknown>): RoomModel {
     pricePerNight: centsToMoney(Number(row.price_per_night_cents ?? 0)),
     active,
     available: row.available === undefined ? undefined : Number(row.available) === 1 && active,
+    availableFrom: row.available_from ? String(row.available_from) : undefined,
     createdAt: row.created_at ? String(row.created_at) : undefined,
     updatedAt: row.updated_at ? String(row.updated_at) : undefined,
   };
@@ -91,24 +92,35 @@ export class RoomRepository {
     const result = from && to
       ? await dbClient.execute({
           sql: `SELECT rm.*,
-                       CASE WHEN NOT EXISTS (
-                         SELECT 1 FROM reservations r
-                         WHERE r.room_id = rm.id
-                           AND r.estado IN ('Pendiente', 'Confirmada', 'CheckIn')
-                           AND r.fecha_entrada < ?
-                           AND r.fecha_salida > ?
-                           AND (? IS NULL OR r.id <> ?)
-                       ) THEN 1 ELSE 0 END AS available
-                FROM rooms rm WHERE rm.active = 1 ORDER BY rm.code;`,
+                       CASE WHEN rm.active = 1 AND conflicts.room_id IS NULL THEN 1 ELSE 0 END AS available,
+                       conflicts.available_from
+                FROM rooms rm
+                LEFT JOIN (
+                  SELECT room_id, MIN(fecha_salida) AS available_from
+                  FROM reservations
+                  WHERE estado IN ('Pendiente', 'Confirmada', 'CheckIn')
+                    AND fecha_entrada < ?
+                    AND fecha_salida > ?
+                    AND (? IS NULL OR id <> ?)
+                  GROUP BY room_id
+                ) conflicts ON conflicts.room_id = rm.id
+                ORDER BY rm.code;`,
           args: [to, from, excludeReservationId ?? null, excludeReservationId ?? null],
         })
       : await dbClient.execute({
           sql: `SELECT rm.*,
-                       CASE WHEN EXISTS (
-                         SELECT 1 FROM stays s
-                         WHERE s.room_id = rm.id AND s.estado = 'Activa'
-                       ) THEN 0 ELSE 1 END AS available
-                FROM rooms rm WHERE rm.active = 1 ORDER BY rm.code;`,
+                       CASE WHEN rm.active = 1 AND occupied.room_id IS NULL THEN 1 ELSE 0 END AS available,
+                       occupied.available_from
+                FROM rooms rm
+                LEFT JOIN (
+                  SELECT s.room_id, MIN(r.fecha_salida) AS available_from
+                  FROM stays s
+                  INNER JOIN reservations r ON r.id = s.reservation_id
+                  WHERE s.estado = 'Activa'
+                    AND r.estado = 'CheckIn'
+                  GROUP BY s.room_id
+                ) occupied ON occupied.room_id = rm.id
+                ORDER BY rm.code;`,
         });
     return result.rows.map((row) => mapRoom(row as Record<string, unknown>) as RoomWithAvailabilityModel);
   }

@@ -131,10 +131,10 @@ describe("Simplified PMS integration: rooms, reservation account and checkout", 
     assert.equal(deactivated.body.data.active, false);
 
     const afterDeactivation = await request("/api/v1/rooms/availability?from=2036-01-10&to=2036-01-12");
-    assert.equal(
-      afterDeactivation.body.data.some((item: { id: number }) => item.id === roomId),
-      false
-    );
+    const inactiveAvailability = afterDeactivation.body.data.find((item: { id: number }) => item.id === roomId);
+    assert.ok(inactiveAvailability);
+    assert.equal(inactiveAvailability.active, false);
+    assert.equal(inactiveAvailability.available, false);
     const allRooms = await request("/api/v1/rooms");
     const inactive = allRooms.body.data.find((item: { id: number }) => item.id === roomId);
     assert.ok(inactive);
