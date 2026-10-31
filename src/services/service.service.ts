@@ -1,4 +1,9 @@
-import { CreateCatalogServiceDto, CreateConsumptionDto, UpdateCatalogServiceDto } from "../dtos/service.dto.js";
+import {
+  CreateCatalogServiceDto,
+  CreateConsumptionDto,
+  UpdateCatalogServiceDto,
+  UpdateConsumptionDto,
+} from "../dtos/service.dto.js";
 import { ConsumptionStatus, ServiceCatalogModel } from "../models/service.model.js";
 import { ServiceRepository } from "../repositories/service.repository.js";
 import { centsToMoney, parseMoneyToCents } from "../utils/money.js";
@@ -75,6 +80,36 @@ export class ServiceService {
     }
     if (current.estado === next) return current;
     return this.repository.updateConsumptionStatus(id, next, userId);
+  }
+
+  public async updateConsumption(id: number, dto: UpdateConsumptionDto, userId: string, role: string) {
+    const current = await this.repository.findConsumptionById(id);
+    if (!current) throw { statusCode: 404, code: "NOT_FOUND", message: "Consumo no encontrado" };
+    if (current.sourceType !== "DIRECT") {
+      throw {
+        statusCode: 409,
+        code: "SOURCE_MANAGED",
+        message: "Los cargos de pedidos y lavandería se modifican desde su módulo de origen",
+      };
+    }
+    const quantity = dto.cantidad === undefined ? current.cantidad : Number(dto.cantidad);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La cantidad debe ser un entero mayor que cero" };
+    }
+    if (dto.precioUnitario !== undefined && role !== "ADMIN") {
+      throw { statusCode: 403, code: "FORBIDDEN", message: "Solo administración puede modificar el precio unitario" };
+    }
+    const unitPriceCents = dto.precioUnitario === undefined
+      ? parseMoneyToCents(current.precioUnitario, "precioUnitario")
+      : parseMoneyToCents(dto.precioUnitario, "precioUnitario");
+    return this.repository.updateConsumption({
+      id,
+      quantity,
+      unitPriceCents,
+      observations: dto.observaciones !== undefined ? dto.observaciones.trim() || undefined : current.observaciones,
+      userId,
+      now: new Date().toISOString(),
+    });
   }
 
   public isTransitionAllowed(current: ConsumptionStatus, next: ConsumptionStatus): boolean {

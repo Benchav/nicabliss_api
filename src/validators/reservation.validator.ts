@@ -2,15 +2,28 @@ import { z } from "zod";
 
 const moneyValue = z.union([z.number().positive(), z.string().trim().min(1)]);
 
+const customerInput = z.object({
+  nombre: z.string().trim().min(1).max(160),
+  apellido: z.string().trim().max(160).optional(),
+  documento: z.string().trim().min(1).max(60),
+  telefono: z.string().trim().max(40).optional(),
+  correo: z.string().trim().email().max(160).optional(),
+  direccion: z.string().trim().max(300).optional(),
+});
+
 export const createReservationSchema = z.object({
-  customerId: z.coerce.number().int().positive(),
+  customerId: z.coerce.number().int().positive().optional(),
+  customer: customerInput.optional(),
   roomId: z.coerce.number().int().positive(),
   fechaEntrada: z.string().trim(),
   fechaSalida: z.string().trim(),
-  totalReserva: moneyValue,
+  totalReserva: moneyValue.optional(),
   depositType: z.enum(["PERCENTAGE", "FIXED"]).default("PERCENTAGE"),
   depositValue: z.union([z.number().nonnegative(), z.string().trim().min(1)]).default(50),
   observaciones: z.string().trim().max(1000).optional(),
+}).refine((value) => Boolean(value.customerId) || Boolean(value.customer), {
+  message: "Debe seleccionar un cliente o enviar los datos del nuevo huésped",
+  path: ["customerId"],
 });
 
 export const updateReservationSchema = z.object({

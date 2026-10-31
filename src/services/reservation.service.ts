@@ -2,8 +2,11 @@ import {
   CreateReservationDto,
   UpdateReservationDto,
 } from "../dtos/reservation.dto.js";
+import { CustomerModel } from "../models/customer.model.js";
 import { DepositType, ReservationModel, ReservationStatus } from "../models/reservation.model.js";
+import { CustomerRepository, normalizeDocument } from "../repositories/customer.repository.js";
 import { ReservationRepository } from "../repositories/reservation.repository.js";
+import { RoomRepository } from "../repositories/room.repository.js";
 import { assertIsoDate } from "../utils/date.js";
 import { parseMoneyToCents } from "../utils/money.js";
 
@@ -36,8 +39,18 @@ function calculateDeposit(
   return { storedValue: requiredCents, requiredCents };
 }
 
+export function calculateNights(fechaEntrada: string, fechaSalida: string): number {
+  const start = Date.parse(`${fechaEntrada}T00:00:00.000Z`);
+  const end = Date.parse(`${fechaSalida}T00:00:00.000Z`);
+  return Math.round((end - start) / 86_400_000);
+}
+
 export class ReservationService {
-  public constructor(private readonly reservationRepository: ReservationRepository) {}
+  public constructor(
+    private readonly reservationRepository: ReservationRepository,
+    private readonly customerRepository: CustomerRepository = new CustomerRepository(),
+    private readonly roomRepository: RoomRepository = new RoomRepository()
+  ) {}
 
   public async getAll(search?: string, status?: ReservationStatus): Promise<ReservationModel[]> {
     return this.reservationRepository.findAll(search, status);
@@ -58,24 +71,43 @@ export class ReservationService {
       assertIsoDate(to, "to");
       if (to <= from) throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La salida debe ser posterior a la entrada" };
     }
-    return this.reservationRepository.getRooms(from, to);
+    return this.roomRepository.getAvailability(from, to);
   }
 
-  public async create(dto: CreateReservationDto, userId: string): Promise<ReservationModel> {
+  public async create(
+    dto: CreateReservationDto,
+    userId: string,
+    ipAddress?: string
+  ): Promise<ReservationModel> {
     assertIsoDate(dto.fechaEntrada, "fechaEntrada");
     assertIsoDate(dto.fechaSalida, "fechaSalida");
     if (dto.fechaSalida <= dto.fechaEntrada) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La salida debe ser posterior a la entrada" };
     }
-    const totalCents = parseMoneyToCents(dto.totalReserva, "totalReserva");
+    const nights = calculateNights(dto.fechaEntrada, dto.fechaSalida);
+    if (nights < 1) {
+      throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La reserva debe cubrir al menos una noche" };
+    }
+
+    const customerId = await this.resolveCustomer(dto, userId, ipAddress);
+    const room = await this.roomRepository.findById(Number(dto.roomId));
+    if (!room || !room.active) {
+      throw { statusCode: 404, code: "NOT_FOUND", message: "Habitación no encontrada o inactiva" };
+    }
+
+    const pricing = this.resolvePricing(dto.totalReserva, room.pricePerNight, nights);
     const depositType = dto.depositType || "PERCENTAGE";
-    const deposit = calculateDeposit(totalCents, depositType, dto.depositValue ?? 50);
+    const deposit = calculateDeposit(pricing.lodgingCents, depositType, dto.depositValue ?? 50);
+
     return this.reservationRepository.create({
-      customerId: Number(dto.customerId),
-      roomId: Number(dto.roomId),
+      customerId,
+      roomId: room.id,
       fechaEntrada: dto.fechaEntrada,
       fechaSalida: dto.fechaSalida,
-      totalCents,
+      totalCents: pricing.lodgingCents,
+      roomPriceCents: pricing.roomPriceCents,
+      nights,
+      lodgingTotalCents: pricing.lodgingCents,
       depositType,
       depositValue: deposit.storedValue,
       depositRequiredCents: deposit.requiredCents,
@@ -94,16 +126,33 @@ export class ReservationService {
     if (fechaSalida <= fechaEntrada) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La salida debe ser posterior a la entrada" };
     }
-    const totalCents = dto.totalReserva === undefined
-      ? parseMoneyToCents(current.totalReserva, "totalReserva")
-      : parseMoneyToCents(dto.totalReserva, "totalReserva");
-    const deposit = calculateDeposit(totalCents, current.depositType, current.depositValue);
+    const nights = calculateNights(fechaEntrada, fechaSalida);
+    const roomId = dto.roomId ?? current.roomId;
+    const room = await this.roomRepository.findById(roomId);
+    if (!room || !room.active) {
+      throw { statusCode: 404, code: "NOT_FOUND", message: "Habitación no encontrada o inactiva" };
+    }
+
+    const pricing = this.resolvePricing(
+      dto.totalReserva,
+      dto.roomId !== undefined || dto.fechaEntrada !== undefined || dto.fechaSalida !== undefined
+        ? (room.pricePerNight > 0 ? room.pricePerNight : current.roomPricePerNight)
+        : current.roomPricePerNight,
+      nights
+    );
+    if (pricing.lodgingCents < Math.round(current.abonado * 100)) {
+      throw { statusCode: 400, code: "TOTAL_BELOW_PAID", message: "El total no puede ser inferior a lo abonado" };
+    }
+    const deposit = calculateDeposit(pricing.lodgingCents, current.depositType, current.depositValue);
     return this.reservationRepository.update({
       id,
-      roomId: dto.roomId ?? current.roomId,
+      roomId,
       fechaEntrada,
       fechaSalida,
-      totalCents,
+      totalCents: pricing.lodgingCents,
+      roomPriceCents: pricing.roomPriceCents,
+      nights,
+      lodgingTotalCents: pricing.lodgingCents,
       depositRequiredCents: deposit.requiredCents,
       observaciones: dto.observaciones !== undefined ? dto.observaciones.trim() || undefined : current.observaciones,
       updatedBy: userId,
@@ -125,5 +174,81 @@ export class ReservationService {
       throw { statusCode: 409, code: "DEPOSIT_REQUIRED", message: "La reserva aún no cumple el anticipo requerido" };
     }
     return this.reservationRepository.updateStatus(id, next, userId);
+  }
+
+  /**
+   * Resuelve el cliente de la reserva. Si llega `customerId` se usa el existente;
+   * si llega el objeto `customer` se busca por documento y, de no existir, se registra.
+   */
+  private async resolveCustomer(
+    dto: CreateReservationDto,
+    userId: string,
+    ipAddress?: string
+  ): Promise<number> {
+    if (dto.customerId) {
+      const existing = await this.customerRepository.findById(Number(dto.customerId));
+      if (!existing) throw { statusCode: 404, code: "NOT_FOUND", message: "Cliente no encontrado" };
+      return existing.id;
+    }
+    const input = dto.customer;
+    if (!input?.nombre?.trim() || !input?.documento?.trim()) {
+      throw {
+        statusCode: 400,
+        code: "CUSTOMER_REQUIRED",
+        message: "Debe seleccionar un cliente o registrar los datos del nuevo huésped",
+      };
+    }
+    const document = input.documento.trim();
+    const found = await this.customerRepository.findByNormalizedDocument(document);
+    if (found) return found.id;
+
+    const now = new Date().toISOString();
+    const record: Omit<CustomerModel, "id"> = {
+      nombre: input.nombre.trim(),
+      apellido: input.apellido?.trim() || undefined,
+      documento: document,
+      telefono: input.telefono?.trim() || undefined,
+      correo: input.correo?.trim().toLowerCase() || undefined,
+      direccion: input.direccion?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      const created = await this.customerRepository.create(record);
+      return created.id;
+    } catch (error) {
+      // Concurrencia: otro request pudo registrar el mismo documento.
+      const raced = await this.customerRepository.findByNormalizedDocument(document);
+      if (raced) return raced.id;
+      if (normalizeDocument(document) === "") {
+        throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El documento no es válido" };
+      }
+      void userId;
+      void ipAddress;
+      throw error;
+    }
+  }
+
+  private resolvePricing(
+    totalReserva: number | string | undefined,
+    roomPrice: number,
+    nights: number
+  ): { lodgingCents: number; roomPriceCents: number } {
+    if (totalReserva !== undefined && totalReserva !== "") {
+      const lodgingCents = parseMoneyToCents(totalReserva, "totalReserva");
+      if (lodgingCents <= 0) {
+        throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El total de la reserva debe ser mayor que cero" };
+      }
+      return { lodgingCents, roomPriceCents: Math.max(0, Math.round(lodgingCents / Math.max(nights, 1))) };
+    }
+    const roomPriceCents = parseMoneyToCents(roomPrice, "pricePerNight");
+    if (roomPriceCents <= 0) {
+      throw {
+        statusCode: 400,
+        code: "ROOM_PRICE_REQUIRED",
+        message: "La habitación no tiene precio configurado. Configúralo en el panel de habitaciones",
+      };
+    }
+    return { lodgingCents: roomPriceCents * nights, roomPriceCents };
   }
 }

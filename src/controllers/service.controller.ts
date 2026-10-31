@@ -40,4 +40,10 @@ export class ServiceController {
       res.json({ success: true, data, message: "Estado del servicio actualizado" });
     } catch (error) { next(error); }
   };
+  public updateConsumption = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const data = await this.service.updateConsumption(Number(req.params.id), req.body, req.user!.sub, req.user!.role);
+      res.json({ success: true, data, message: "Consumo actualizado" });
+    } catch (error) { next(error); }
+  };
 }

@@ -18,3 +18,9 @@ export interface CreateConsumptionDto {
   observaciones?: string;
   estado?: ConsumptionStatus;
 }
+
+export interface UpdateConsumptionDto {
+  cantidad?: number;
+  precioUnitario?: number | string;
+  observaciones?: string;
+}

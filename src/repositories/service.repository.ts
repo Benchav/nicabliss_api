@@ -189,4 +189,90 @@ export class ServiceRepository {
     const result = await dbClient.execute({ sql: `${consumptionSelect} WHERE sc.id = ?;`, args: [id] });
     return mapConsumption(result.rows[0] as Record<string, unknown>);
   }
+
+  public async updateConsumption(input: {
+    id: number;
+    quantity: number;
+    unitPriceCents: number;
+    observations?: string;
+    userId: string;
+    now: string;
+  }): Promise<ServiceConsumptionModel> {
+    const transaction = await dbClient.transaction("write");
+    try {
+      const current = await transaction.execute({
+        sql: "SELECT stay_id, source_type, estado, cantidad, precio_unitario_cents, observaciones FROM service_consumptions WHERE id = ? LIMIT 1;",
+        args: [input.id],
+      });
+      if (!current.rows[0]) {
+        throw { statusCode: 404, code: "NOT_FOUND", message: "Consumo no encontrado" };
+      }
+      const row = current.rows[0];
+      const stayId = Number(row.stay_id);
+      if (String(row.source_type) !== "DIRECT") {
+        throw {
+          statusCode: 409,
+          code: "SOURCE_MANAGED",
+          message: "Los cargos de pedidos y lavandería se modifican desde su módulo de origen",
+        };
+      }
+      if (String(row.estado) === "Cancelado") {
+        throw {
+          statusCode: 409,
+          code: "CONSUMPTION_CANCELLED",
+          message: "No se puede modificar un consumo cancelado",
+        };
+      }
+      const stay = await transaction.execute({
+        sql: "SELECT estado FROM stays WHERE id = ? LIMIT 1;",
+        args: [stayId],
+      });
+      if (!stay.rows[0] || stay.rows[0].estado !== "Activa") {
+        throw { statusCode: 409, code: "STAY_NOT_ACTIVE", message: "La estancia no está activa" };
+      }
+      await this.assertNoIssuedInvoice(transaction, stayId);
+
+      await transaction.execute({
+        sql: `UPDATE service_consumptions
+              SET cantidad = ?, precio_unitario_cents = ?, subtotal_cents = ?,
+                  observaciones = ?, updated_at = ?
+              WHERE id = ?;`,
+        args: [
+          input.quantity,
+          input.unitPriceCents,
+          input.quantity * input.unitPriceCents,
+          input.observations ?? null,
+          input.now,
+          input.id,
+        ],
+      });
+      await transaction.execute({
+        sql: `INSERT INTO audit_logs (user_id, action, entity, entity_id, old_values, new_values, created_at)
+              VALUES (?, 'UPDATE', 'service_consumption', ?, ?, ?, ?);`,
+        args: [
+          input.userId,
+          String(input.id),
+          JSON.stringify({
+            cantidad: Number(row.cantidad),
+            precioUnitarioCents: Number(row.precio_unitario_cents),
+            observaciones: row.observaciones ? String(row.observaciones) : null,
+          }),
+          JSON.stringify({
+            cantidad: input.quantity,
+            precioUnitarioCents: input.unitPriceCents,
+            observaciones: input.observations ?? null,
+          }),
+          input.now,
+        ],
+      });
+      await transaction.commit();
+    } catch (error) {
+      if (!transaction.closed) await transaction.rollback();
+      throw error;
+    } finally {
+      transaction.close();
+    }
+    const result = await dbClient.execute({ sql: `${consumptionSelect} WHERE sc.id = ?;`, args: [input.id] });
+    return mapConsumption(result.rows[0] as Record<string, unknown>);
+  }
 }

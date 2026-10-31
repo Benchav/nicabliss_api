@@ -15,3 +15,11 @@ export const createConsumptionSchema = z.object({
   precioUnitario: money.optional(), observaciones: z.string().trim().max(1000).optional(), estado: status.optional(),
 });
 export const updateConsumptionStatusSchema = z.object({ estado: status });
+
+export const updateConsumptionSchema = z.object({
+  cantidad: z.coerce.number().int().positive().optional(),
+  precioUnitario: money.optional(),
+  observaciones: z.string().trim().max(1000).optional(),
+}).refine((value) => Object.keys(value).length > 0, {
+  message: "Debe enviar al menos un campo",
+});
