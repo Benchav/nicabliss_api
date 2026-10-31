@@ -49,17 +49,24 @@ export class RoomService {
       pricePerNight: dto.pricePerNight === undefined ? current.pricePerNight : dto.pricePerNight,
       active: dto.active ?? current.active,
     };
-    return this.repository.update({ ...this.toRecord(merged), id }, { userId, ipAddress });
+    return this.repository.update({ ...this.toRecord(merged, !merged.active), id }, { userId, ipAddress });
   }
 
   public async deactivate(id: number, userId: string, ipAddress?: string): Promise<RoomModel> {
     return this.repository.deactivate(id, { userId, ipAddress }, new Date().toISOString());
   }
 
-  private toRecord(dto: CreateRoomDto) {
+  private toRecord(dto: CreateRoomDto, allowZeroPrice = false) {
     const pricePerNightCents = parseMoneyToCents(dto.pricePerNight ?? 0, "pricePerNight");
     if (!Number.isSafeInteger(pricePerNightCents) || pricePerNightCents < 0) {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "El precio por noche debe ser un importe válido" };
+    }
+    if (pricePerNightCents === 0 && !allowZeroPrice) {
+      throw {
+        statusCode: 400,
+        code: "ROOM_PRICE_REQUIRED",
+        message: "Configura un precio por noche mayor que cero para mantener activa la habitación",
+      };
     }
     return {
       code: dto.code.trim(),

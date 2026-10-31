@@ -89,13 +89,12 @@ export class ReservationService {
       throw { statusCode: 400, code: "VALIDATION_ERROR", message: "La reserva debe cubrir al menos una noche" };
     }
 
-    const customerId = await this.resolveCustomer(dto, userId, ipAddress);
     const room = await this.roomRepository.findById(Number(dto.roomId));
     if (!room || !room.active) {
       throw { statusCode: 404, code: "NOT_FOUND", message: "Habitación no encontrada o inactiva" };
     }
-
     const pricing = this.resolvePricing(dto.totalReserva, room.pricePerNight, nights);
+    const customerId = await this.resolveCustomer(dto, userId, ipAddress);
     const depositType = dto.depositType || "PERCENTAGE";
     const deposit = calculateDeposit(pricing.lodgingCents, depositType, dto.depositValue ?? 50);
 
