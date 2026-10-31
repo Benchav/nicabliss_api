@@ -106,6 +106,8 @@ Todos los endpoints funcionales usan el prefijo `/api/v1` y, salvo login, requie
 
 ## RBAC
 
+Consulta la [guía detallada de roles y permisos](rolee-permisos.md) para ver los permisos por endpoint, las restricciones de los módulos heredados y el alcance de cada rol.
+
 | Capacidad | ADMIN | RECEPTIONIST | STAFF |
 | --- | :---: | :---: | :---: |
 | Clientes, reservas, pagos y facturas | Sí | Sí | No |
