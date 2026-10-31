@@ -2,11 +2,60 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
+import type { Transaction } from "@libsql/client";
 import { dbClient } from "./client.js";
 import { Logger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const addColumnPattern =
+  /^[ \t]*ALTER[ \t]+TABLE[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+ADD[ \t]+COLUMN[ \t]+([A-Za-z_][A-Za-z0-9_]*)[^\r\n]*$/gim;
+
+/**
+ * Omite las sentencias `ALTER TABLE ... ADD COLUMN` cuya columna ya existe.
+ * SQLite no soporta `ADD COLUMN IF NOT EXISTS`; este filtro permite reintentar
+ * una migración sobre una base con desviación manual sin perder atomicidad.
+ * El checksum guardado sigue calculándose sobre el SQL original.
+ */
+export function omitExistingColumns(
+  sql: string,
+  existingColumns: ReadonlyMap<string, ReadonlySet<string>>
+): string {
+  return sql.replace(addColumnPattern, (statement, table: string, column: string) => {
+    const columns = existingColumns.get(table.toLowerCase());
+    return columns?.has(column.toLowerCase())
+      ? `-- [idempotente] ${table}.${column} ya existe; ALTER TABLE omitido`
+      : statement;
+  });
+}
+
+function hasExecutableSql(sql: string): boolean {
+  return sql
+    .split(/\r?\n/)
+    .some((line) => line.trim().length > 0 && !line.trim().startsWith("--"));
+}
+
+async function loadExistingColumns(
+  sql: string,
+  transaction: Transaction
+): Promise<Map<string, Set<string>>> {
+  const tables = new Set<string>();
+  for (const match of sql.matchAll(/ALTER[ \t]+TABLE[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+ADD[ \t]+COLUMN/gi)) {
+    tables.add(match[1].toLowerCase());
+  }
+
+  const existingColumns = new Map<string, Set<string>>();
+  for (const table of tables) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) continue;
+    const info = await transaction.execute(`PRAGMA table_info(${table});`);
+    existingColumns.set(
+      table,
+      new Set(info.rows.map((row) => String(row.name).toLowerCase()))
+    );
+  }
+  return existingColumns;
+}
 
 export async function runMigrations(): Promise<void> {
   const migrationsPath = path.join(__dirname, "migrations");
@@ -57,7 +106,11 @@ export async function runMigrations(): Promise<void> {
 
       const transaction = await dbClient.transaction("write");
       try {
-        await transaction.executeMultiple(sql);
+        const existingColumns = await loadExistingColumns(sql, transaction);
+        const executableSql = omitExistingColumns(sql, existingColumns);
+        if (hasExecutableSql(executableSql)) {
+          await transaction.executeMultiple(executableSql);
+        }
         await transaction.execute({
           sql: `INSERT INTO schema_migrations (version, name, checksum, applied_at)
                 VALUES (?, ?, ?, ?);`,

@@ -8,7 +8,7 @@ import { ServiceRepository } from "../repositories/service.repository.js";
 import { StayRepository } from "../repositories/stay.repository.js";
 import { ServiceService } from "../services/service.service.js";
 import { StayService } from "../services/stay.service.js";
-import { createCatalogSchema, createConsumptionSchema, updateCatalogSchema, updateConsumptionStatusSchema } from "../validators/service.validator.js";
+import { createCatalogSchema, createConsumptionSchema, updateCatalogSchema, updateConsumptionSchema, updateConsumptionStatusSchema } from "../validators/service.validator.js";
 
 export const stayRepository = new StayRepository();
 export const serviceRepository = new ServiceRepository();
@@ -35,3 +35,4 @@ serviceCatalogRouter.put("/:id", requireRole("ADMIN"), validateBody(updateCatalo
 export const serviceConsumptionRouter = Router();
 serviceConsumptionRouter.use(authMiddleware, requireRole("ADMIN", "RECEPTIONIST", "STAFF"));
 serviceConsumptionRouter.patch("/:id/status", validateBody(updateConsumptionStatusSchema), serviceController.updateStatus);
+serviceConsumptionRouter.put("/:id", requireRole("ADMIN", "RECEPTIONIST"), validateBody(updateConsumptionSchema), serviceController.updateConsumption);

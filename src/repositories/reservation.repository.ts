@@ -8,7 +8,7 @@ import {
 import { centsToMoney } from "../utils/money.js";
 
 const reservationSelect = `
-  SELECT r.*, rm.code AS room_code,
+  SELECT r.*, rm.code AS room_code, rm.category AS room_category, rm.price_per_night_cents,
          c.nombre || CASE WHEN c.apellido IS NULL OR c.apellido = '' THEN '' ELSE ' ' || c.apellido END AS customer_name,
          c.documento AS customer_document,
          COALESCE((
@@ -26,6 +26,15 @@ function mapReservation(row: Record<string, unknown>): ReservationModel {
   const paidCents = Number(row.paid_cents || 0);
   const depositType = row.deposit_type as DepositType;
   const storedDepositValue = Number(row.deposit_value);
+  const nights = row.nights === null || row.nights === undefined
+    ? Math.max(1, Math.round((Date.parse(String(row.fecha_salida)) - Date.parse(String(row.fecha_entrada))) / 86_400_000))
+    : Number(row.nights);
+  const roomPriceCents = row.room_price_cents === null || row.room_price_cents === undefined
+    ? Math.round(totalCents / Math.max(nights, 1))
+    : Number(row.room_price_cents);
+  const lodgingTotalCents = row.lodging_total_cents === null || row.lodging_total_cents === undefined
+    ? totalCents
+    : Number(row.lodging_total_cents);
   return {
     id: Number(row.id),
     codigoReserva: String(row.codigo_reserva),
@@ -34,8 +43,12 @@ function mapReservation(row: Record<string, unknown>): ReservationModel {
     customerDocument: String(row.customer_document),
     roomId: Number(row.room_id),
     habitacion: String(row.habitacion),
+    roomCategory: row.room_category ? String(row.room_category) : undefined,
     fechaEntrada: String(row.fecha_entrada),
     fechaSalida: String(row.fecha_salida),
+    nights,
+    roomPricePerNight: centsToMoney(roomPriceCents),
+    lodgingTotal: centsToMoney(lodgingTotalCents),
     totalReserva: centsToMoney(totalCents),
     depositType,
     depositValue: depositType === "PERCENTAGE" ? storedDepositValue / 100 : centsToMoney(storedDepositValue),
@@ -43,6 +56,8 @@ function mapReservation(row: Record<string, unknown>): ReservationModel {
     abonado: centsToMoney(paidCents),
     saldo: centsToMoney(Math.max(totalCents - paidCents, 0)),
     estado: row.estado as ReservationStatus,
+    checkInAt: row.check_in_at ? String(row.check_in_at) : undefined,
+    checkOutAt: row.check_out_at ? String(row.check_out_at) : undefined,
     observaciones: row.observaciones ? String(row.observaciones) : undefined,
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
@@ -56,6 +71,9 @@ export interface NewReservationRecord {
   fechaEntrada: string;
   fechaSalida: string;
   totalCents: number;
+  roomPriceCents: number;
+  nights: number;
+  lodgingTotalCents: number;
   depositType: DepositType;
   depositValue: number;
   depositRequiredCents: number;
@@ -70,6 +88,9 @@ export interface UpdateReservationRecord {
   fechaEntrada: string;
   fechaSalida: string;
   totalCents: number;
+  roomPriceCents: number;
+  nights: number;
+  lodgingTotalCents: number;
   depositRequiredCents: number;
   observaciones?: string;
   updatedBy: string;
@@ -130,8 +151,13 @@ export class ReservationRepository {
       id: Number(row.id),
       code: String(row.code),
       name: String(row.name),
+      category: row.category ? String(row.category) : undefined,
+      description: row.description ? String(row.description) : undefined,
+      pricePerNight: centsToMoney(Number(row.price_per_night_cents ?? 0)),
       active: Number(row.active) === 1,
       available: Number(row.available) === 1,
+      createdAt: row.created_at ? String(row.created_at) : undefined,
+      updatedAt: row.updated_at ? String(row.updated_at) : undefined,
     }));
   }
 
@@ -169,10 +195,10 @@ export class ReservationRepository {
       const inserted = await transaction.execute({
         sql: `INSERT INTO reservations (
                 codigo_reserva, customer_id, room_id, habitacion, fecha_entrada,
-                fecha_salida, total_reserva_cents, deposit_type, deposit_value,
-                deposito_requerido_cents, estado, observaciones, created_by,
+                fecha_salida, total_reserva_cents, room_price_cents, nights, lodging_total_cents,
+                deposit_type, deposit_value, deposito_requerido_cents, estado, observaciones, created_by,
                 created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?);`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?);`,
         args: [
           code,
           record.customerId,
@@ -181,6 +207,9 @@ export class ReservationRepository {
           record.fechaEntrada,
           record.fechaSalida,
           record.totalCents,
+          record.roomPriceCents,
+          record.nights,
+          record.lodgingTotalCents,
           record.depositType,
           record.depositValue,
           record.depositRequiredCents,
@@ -245,7 +274,8 @@ export class ReservationRepository {
 
       await transaction.execute({
         sql: `UPDATE reservations SET room_id = ?, habitacion = ?, fecha_entrada = ?,
-                fecha_salida = ?, total_reserva_cents = ?, deposito_requerido_cents = ?,
+                fecha_salida = ?, total_reserva_cents = ?, room_price_cents = ?, nights = ?,
+                lodging_total_cents = ?, deposito_requerido_cents = ?,
                 observaciones = ?, updated_at = ? WHERE id = ?;`,
         args: [
           record.roomId,
@@ -253,6 +283,9 @@ export class ReservationRepository {
           record.fechaEntrada,
           record.fechaSalida,
           record.totalCents,
+          record.roomPriceCents,
+          record.nights,
+          record.lodgingTotalCents,
           record.depositRequiredCents,
           record.observaciones ?? null,
           record.now,

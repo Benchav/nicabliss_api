@@ -119,6 +119,10 @@ export class StayRepository {
       if (existing.rows[0]) {
         stayId = Number(existing.rows[0].id);
         await this.attachPreorders(transaction, reservationId, stayId, userId, now);
+        await transaction.execute({
+          sql: "UPDATE reservations SET check_in_at = COALESCE(check_in_at, ?), updated_at = ? WHERE id = ?;",
+          args: [now, now, reservationId],
+        });
         await transaction.commit();
         return (await this.findById(stayId))!;
       }
@@ -148,8 +152,8 @@ export class StayRepository {
       stayId = Number(inserted.lastInsertRowid);
       await this.attachPreorders(transaction, reservationId, stayId, userId, now);
       await transaction.execute({
-        sql: "UPDATE reservations SET estado = 'CheckIn', updated_at = ? WHERE id = ?;",
-        args: [now, reservationId],
+        sql: "UPDATE reservations SET estado = 'CheckIn', check_in_at = COALESCE(check_in_at, ?), updated_at = ? WHERE id = ?;",
+        args: [now, now, reservationId],
       });
       await transaction.execute({
         sql: `INSERT INTO audit_logs (user_id, action, entity, entity_id, new_values, ip_address, created_at)
@@ -196,8 +200,8 @@ export class StayRepository {
         args: [now, now, stayId],
       });
       await transaction.execute({
-        sql: "UPDATE reservations SET estado = 'Finalizada', updated_at = ? WHERE id = ?;",
-        args: [now, stay.rows[0].reservation_id],
+        sql: "UPDATE reservations SET estado = 'Finalizada', check_out_at = ?, updated_at = ? WHERE id = ?;",
+        args: [now, now, stay.rows[0].reservation_id],
       });
       await transaction.execute({
         sql: `INSERT INTO audit_logs (user_id, action, entity, entity_id, new_values, ip_address, created_at)

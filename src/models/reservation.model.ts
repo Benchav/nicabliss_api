@@ -1,3 +1,5 @@
+import type { RoomModel } from "./room.model.js";
+
 export type ReservationStatus =
   | "Pendiente"
   | "Confirmada"
@@ -8,12 +10,7 @@ export type ReservationStatus =
 
 export type DepositType = "PERCENTAGE" | "FIXED";
 
-export interface RoomModel {
-  id: number;
-  code: string;
-  name: string;
-  active: boolean;
-}
+export type { RoomModel };
 
 export interface ReservationModel {
   id: number;
@@ -23,8 +20,12 @@ export interface ReservationModel {
   customerDocument: string;
   roomId: number;
   habitacion: string;
+  roomCategory?: string;
   fechaEntrada: string;
   fechaSalida: string;
+  nights: number;
+  roomPricePerNight: number;
+  lodgingTotal: number;
   totalReserva: number;
   depositType: DepositType;
   depositValue: number;
@@ -32,6 +33,8 @@ export interface ReservationModel {
   abonado: number;
   saldo: number;
   estado: ReservationStatus;
+  checkInAt?: string;
+  checkOutAt?: string;
   observaciones?: string;
   createdBy: string;
   createdAt: string;
