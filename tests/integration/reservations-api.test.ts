@@ -78,6 +78,11 @@ describe("Customers, reservations and payments integration", () => {
     assert.equal(reservation.body.data.depositoRequerido, 50);
     reservationId = reservation.body.data.id;
 
+    const occupiedRange = await request("/api/v1/rooms/availability?from=2027-01-11&to=2027-01-12");
+    const occupiedRoom = occupiedRange.body.data.find((item: { id: number }) => item.id === room.id);
+    assert.equal(occupiedRoom.available, false);
+    assert.equal(occupiedRoom.availableFrom, "2027-01-12");
+
     const overlap = await request("/api/v1/reservations", {
       method: "POST",
       body: JSON.stringify({
