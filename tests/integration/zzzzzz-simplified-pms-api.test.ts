@@ -89,6 +89,20 @@ describe("Simplified PMS integration: rooms, reservation account and checkout", 
     assert.equal(created.body.data.pricePerNight, 75.5);
     const roomId = created.body.data.id;
 
+    const zeroPriceRoom = await request("/api/v1/rooms", {
+      method: "POST",
+      body: JSON.stringify({ code: "PMS-ROOM-ZERO", name: "Sin tarifa", pricePerNight: 0 }),
+    });
+    assert.equal(zeroPriceRoom.status, 400);
+    assert.equal(zeroPriceRoom.body.error.code, "ROOM_PRICE_REQUIRED");
+
+    const zeroPriceUpdate = await request(`/api/v1/rooms/${roomId}`, {
+      method: "PUT",
+      body: JSON.stringify({ pricePerNight: 0 }),
+    });
+    assert.equal(zeroPriceUpdate.status, 400);
+    assert.equal(zeroPriceUpdate.body.error.code, "ROOM_PRICE_REQUIRED");
+
     const duplicate = await request("/api/v1/rooms", {
       method: "POST",
       body: JSON.stringify({ code: "PMS-ROOM-01", name: "Duplicada", pricePerNight: 10 }),
@@ -137,6 +151,34 @@ describe("Simplified PMS integration: rooms, reservation account and checkout", 
     assert.equal(JSON.parse(String(audit.rows[1].old_values)).category, "Deluxe");
     assert.equal(JSON.parse(String(audit.rows[1].new_values)).category, "Suite");
     assert.equal(JSON.parse(String(audit.rows[2].new_values)).active, false);
+  });
+
+  it("rejects automatic reservation totals for a legacy room with no tariff", async () => {
+    const insertedRoom = await dbClient.execute({
+      sql: `INSERT INTO rooms (code, name, category, price_per_night_cents, active, created_at, updated_at)
+            VALUES ('PMS-ZERO-LEGACY', 'Habitación sin tarifa', 'Estándar', 0, 1, ?, ?);`,
+      args: [new Date().toISOString(), new Date().toISOString()],
+    });
+    const roomId = Number(insertedRoom.lastInsertRowid);
+
+    const reservation = await request("/api/v1/reservations", {
+      method: "POST",
+      body: JSON.stringify({
+        customer: { nombre: "Huésped", documento: "TEST-PMS-UNPRICED-ROOM" },
+        roomId,
+        fechaEntrada: "2036-01-10",
+        fechaSalida: "2036-01-11",
+        depositType: "FIXED",
+        depositValue: 0,
+      }),
+    });
+    assert.equal(reservation.status, 400);
+    assert.equal(reservation.body.error.code, "ROOM_PRICE_REQUIRED");
+
+    const customer = await dbClient.execute({
+      sql: "SELECT id FROM customers WHERE documento_normalizado = 'TEST-PMS-UNPRICED-ROOM' LIMIT 1;",
+    });
+    assert.equal(customer.rows.length, 0, "No debe registrar al cliente si la habitación no tiene tarifa");
   });
 
   it("auto-registers the customer and freezes the room price at reservation time", async () => {
